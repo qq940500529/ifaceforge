@@ -39,8 +39,4 @@ Use test projects, two separate worktrees, a custom install directory, and a fre
 
 The previous technical preview and its acceptance record remain available in the [v0.1.0 tag](https://github.com/qq940500529/ifaceforge/tree/v0.1.0).
 
-## Name review
-
-The initial public repository, npm and web checks on 2026-11-16 found no established same-name API and MCP workbench. Formal trademark clearance remains incomplete. [Initial review record](https://github.com/qq940500529/ifaceforge/blob/v0.1.0/docs/release.md#name-review)
-
 [MIT](https://github.com/qq940500529/ifaceforge/blob/main/LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司
