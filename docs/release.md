@@ -10,6 +10,7 @@ Use Git and Node.js 26 LTS. Node.js 24 LTS remains a CLI and development compati
 npm ci
 npm run build
 npm start
+node node_modules/electron/install.js
 npm run package -- --config.electronDist=node_modules/electron/dist
 ```
 

@@ -3,6 +3,7 @@
   "version": "0.2.0-preview.1",
   "private": true,
   "description": "A desktop workbench for repository APIs, MCP servers, and skills",
+  "homepage": "https://github.com/qq940500529/ifaceforge",
   "main": "./dist/desktop/main.js",
   "license": "MIT",
   "type": "module",

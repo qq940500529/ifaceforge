@@ -85,6 +85,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Fetch the desktop runtime
+        run: node node_modules/electron/install.js
       - name: Install Linux packaging dependencies
         if: runner.os == 'Linux'
         run: |
