@@ -1,11 +1,12 @@
 import { Button, Card, Input, InputNumber, Modal, Select, Space, Tabs, Typography } from 'antd';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Assertion } from '../app/api.js';
 import type { Case } from '../app/runs.js';
 import type { HttpRequest } from '../protocols/http.js';
 import type { Discovery } from '../protocols/mcp.js';
+import type { Pair } from '../protocols/variables.js';
 import type { Entity } from '../scanner/model.js';
-import { command, download } from './client.js';
+import { copyText, download, unwrap } from './client.js';
 import { CatalogList, EntityDetail, useCatalog } from './catalog-page.js';
 import {
   Code,
@@ -25,7 +26,7 @@ import {
 } from './components.js';
 
 function SaveCase({ open, close, make }: { open: boolean; close: () => void; make: () => Partial<Case> }) {
-  const { t, refresh, notify } = useWorkspace();
+  const { t, refresh, notify, command } = useWorkspace();
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState<unknown>();
@@ -68,14 +69,15 @@ function SaveCase({ open, close, make }: { open: boolean; close: () => void; mak
 }
 
 export function ApiPage() {
-  const { t, refresh, notify } = useWorkspace();
+  const { lang, t, refresh, notify, command, projectId } = useWorkspace();
   const list = useCatalog('api');
   const profiles = useProfiles();
   const action = useRun();
   const [profile, setProfile] = useState<string>();
   const [method, setMethod] = useState('GET');
   const [target, setTarget] = useState('');
-  const [targetPreview, setTargetPreview] = useState<{ method: string; url: string }>();
+  const [targetPreview, setTargetPreview] = useState<{ method: string; url: string; draft: string }>();
+  const draftSequence = useRef(0);
   const [operationId, setOperation] = useState<string>();
   const [query, setQuery] = useState('[]');
   const [headers, setHeaders] = useState('[]');
@@ -88,8 +90,10 @@ export function ApiPage() {
   const [importing, setImporting] = useState(false);
   const [importType, setImportType] = useState<'file' | 'url'>('file');
   const [importPath, setImportPath] = useState('');
+  const [importToken, setImportToken] = useState<string>();
   const [service, setService] = useState('');
   const [importBusy, setImportBusy] = useState(false);
+  const draftKey = JSON.stringify([method, target, operationId, query, headers, body, inputs, timeout, profile]);
   const request = (): HttpRequest => ({
     method,
     ...(target.startsWith('/') ? { path: target } : { url: target }),
@@ -119,7 +123,11 @@ export function ApiPage() {
     }
   }
   function choose(entity: Entity) {
-    void safely(async () => update(await command<HttpRequest>('api draft', { id: entity.id })));
+    const sequence = ++draftSequence.current;
+    void safely(async () => {
+      const draft = await command<HttpRequest>('api draft', { id: entity.id });
+      if (sequence === draftSequence.current) update(draft);
+    });
   }
   return (
     <div className="split">
@@ -127,6 +135,7 @@ export function ApiPage() {
         <div className="toolbar">
           <Button
             onClick={() => {
+              draftSequence.current++;
               list.setSelected('');
               update({ method: 'GET' });
             }}
@@ -145,7 +154,7 @@ export function ApiPage() {
                 onClick={() =>
                   void safely(async () => {
                     const data = await command<{ text: string }>('api export', { id: list.selected, format });
-                    download('openapi.' + format, data.text);
+                    await download('openapi.' + format, data.text);
                   })
                 }
               >
@@ -178,22 +187,7 @@ export function ApiPage() {
               />
               <ProfilePicker profiles={profiles.data?.items ?? []} value={profile} change={setProfile} />
             </div>
-            <div className="split split-even">
-              <JsonField label={t('query')} value={query} change={setQuery} rows={3} />
-              <JsonField label={t('header')} value={headers} change={setHeaders} rows={3} />
-              <JsonField label={t('inputs')} value={inputs} change={setInputs} rows={3} />
-              <JsonField label={t('body')} value={body} change={setBody} rows={3} />
-            </div>
-            <JsonField label={t('assertions')} value={assertions} change={setAssertions} rows={3} />
-            <Field label={t('timeout')}>
-              <InputNumber
-                min={1}
-                max={300000}
-                value={timeout}
-                onChange={(value) => setTimeout(value ?? undefined)}
-              />
-            </Field>
-            <Space wrap>
+            <Space wrap className="request-actions">
               <Button
                 type="primary"
                 loading={action.pending}
@@ -212,7 +206,11 @@ export function ApiPage() {
               <Button
                 onClick={() =>
                   void safely(async () => {
-                    setTargetPreview(await command('api preview', { body: request(), profile }));
+                    const preview = await command<{ method: string; url: string }>('api preview', {
+                      body: request(),
+                      profile,
+                    });
+                    setTargetPreview({ ...preview, draft: draftKey });
                   })
                 }
               >
@@ -222,7 +220,7 @@ export function ApiPage() {
                 onClick={() =>
                   void safely(async () => {
                     const data = await command<{ curl: string }>('api curl', { body: request(), profile });
-                    await navigator.clipboard.writeText(data.curl);
+                    await copyText(data.curl);
                     notify(t('copied'));
                   })
                 }
@@ -231,7 +229,22 @@ export function ApiPage() {
               </Button>
               <Button onClick={() => setSaving(true)}>{t('saveCase')}</Button>
             </Space>
-            {targetPreview && <Code value={targetPreview.method + ' ' + targetPreview.url} />}
+            {targetPreview?.draft === draftKey && <Code value={targetPreview.method + ' ' + targetPreview.url} />}
+            <div className="split split-even">
+              <RequestPairs kind="query" value={query} change={setQuery} />
+              <RequestPairs kind="header" value={headers} change={setHeaders} />
+              <JsonField label={t('inputs')} value={inputs} change={setInputs} rows={3} />
+              <JsonField label={t('body')} value={body} change={setBody} rows={3} />
+            </div>
+            <JsonField label={t('assertions')} value={assertions} change={setAssertions} rows={3} />
+            <Field label={t('timeout')}>
+              <InputNumber
+                min={1}
+                max={300000}
+                value={timeout}
+                onChange={(value) => setTimeout(value ?? undefined)}
+              />
+            </Field>
           </div>
         </Card>
         <Card size="small" title={t('response')}>
@@ -259,7 +272,12 @@ export function ApiPage() {
         onOk={() => {
           setImportBusy(true);
           void safely(async () => {
-            await command('api import', { [importType]: importPath, profile, service: service || undefined });
+            await command('api import', {
+              [importType]: importPath,
+              fileToken: importToken,
+              profile,
+              service: service || undefined,
+            });
             refresh();
             setImporting(false);
           }).finally(() => setImportBusy(false));
@@ -269,14 +287,41 @@ export function ApiPage() {
           <ErrorView error={error} />
           <Select
             value={importType}
-            onChange={setImportType}
+            virtual={false}
+            onChange={(type) => {
+              setImportType(type);
+              setImportToken(undefined);
+              setImportPath('');
+            }}
             options={[
               { value: 'file', label: t('file') },
               { value: 'url', label: t('url') },
             ]}
           />
           <Field label={t(importType)}>
-            <Input value={importPath} onChange={(event) => setImportPath(event.target.value)} />
+            <div className="toolbar">
+              <Input
+                className="grow"
+                value={importPath}
+                readOnly={!!importToken}
+                onChange={(event) => setImportPath(event.target.value)}
+              />
+              {projectId && importType === 'file' && (
+                <Button
+                  onClick={() =>
+                    void safely(async () => {
+                      const picked = await unwrap(window.ifaceforge!.chooseFile(projectId, 'openapi'));
+                      if (picked) {
+                        setImportPath(picked.path);
+                        setImportToken(picked.token);
+                      }
+                    })
+                  }
+                >
+                  {lang === 'zh-CN' ? '选择文件' : 'Choose file'}
+                </Button>
+              )}
+            </div>
           </Field>
           <Field label={t('service')}>
             <Input value={service} onChange={(event) => setService(event.target.value)} />
@@ -288,8 +333,74 @@ export function ApiPage() {
   );
 }
 
+function RequestPairs({
+  kind,
+  value,
+  change,
+}: {
+  kind: 'query' | 'header';
+  value: string;
+  change: (next: string) => void;
+}) {
+  const { lang, t } = useWorkspace();
+  const zh = lang === 'zh-CN';
+  const label = kind === 'query' ? (zh ? '查询参数' : 'Query parameters') : zh ? '请求头' : 'Headers';
+  let pairs: Pair[] | undefined;
+  try {
+    const parsed = parse(value);
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((entry) => entry && typeof entry.name === 'string' && 'value' in entry)
+    ) {
+      pairs = parsed as Pair[];
+    }
+  } catch {
+    // The JSON editor stays available while someone is repairing a draft.
+  }
+  const update = (index: number, fields: Partial<Pair>) =>
+    change(json(pairs?.map((pair, at) => (at === index ? { ...pair, ...fields } : pair)) ?? []));
+  return (
+    <div className="request-pairs">
+      {pairs && (
+        <>
+          <Typography.Text strong>{label}</Typography.Text>
+          {pairs.map((pair, index) => (
+            <div className="pair-fields" key={index}>
+              <Input
+                aria-label={label + ' ' + t('name') + ' ' + (index + 1)}
+                placeholder={t('name')}
+                value={pair.name}
+                onChange={(event) => update(index, { name: event.target.value })}
+              />
+              <Input
+                aria-label={label + ' ' + (zh ? '值' : 'value') + ' ' + (index + 1)}
+                placeholder={zh ? '值' : 'Value'}
+                value={typeof pair.value === 'object' ? json(pair.value) : String(pair.value)}
+                onChange={(event) => update(index, { value: event.target.value })}
+              />
+              <Button
+                aria-label={t('remove') + ' ' + label + ' ' + (index + 1)}
+                onClick={() => change(json(pairs?.filter((_entry, at) => at !== index)))}
+              >
+                {t('remove')}
+              </Button>
+            </div>
+          ))}
+          <Button size="small" onClick={() => change(json([...pairs!, { name: '', value: '' }]))}>
+            {kind === 'query' ? (zh ? '添加参数' : 'Add parameter') : zh ? '添加请求头' : 'Add header'}
+          </Button>
+        </>
+      )}
+      <details open={pairs ? undefined : true}>
+        <summary>{t(kind)}</summary>
+        <JsonField label={t(kind)} value={value} change={change} rows={3} />
+      </details>
+    </div>
+  );
+}
+
 export function McpPage() {
-  const { t, refresh } = useWorkspace();
+  const { t, refresh, command } = useWorkspace();
   const profiles = useProfiles();
   const action = useRun();
   const list = useCatalog('mcp');
@@ -359,7 +470,12 @@ export function McpPage() {
                 if (!connection) setProfile(value);
               }}
             />
-            {chosen?.mcp && <Code value={chosen.mcp} />}
+            {chosen?.mcp && (
+              <details>
+                <summary>{t('details')}</summary>
+                <Code value={chosen.mcp} />
+              </details>
+            )}
             <Space wrap>
               {connection ? (
                 <>
@@ -394,6 +510,7 @@ export function McpPage() {
         <Card size="small" title={t('definition')}>
           {effective ? (
             <Tabs
+              onChange={() => setSelected(undefined)}
               items={effective.groups.map((group) => ({
                 key: group.type,
                 label: t(group.type),
@@ -430,12 +547,18 @@ export function McpPage() {
         {selected && (
           <Card size="small" title={selected.name}>
             <div className="stack">
-              <Code value={selected.details} />
+              <details>
+                <summary>{t('definition')}</summary>
+                <Code value={selected.details} />
+              </details>
               {selected.type === 'tool' && (
                 <ToolFields schema={selected.details.inputSchema} value={argument} change={setArgument} />
               )}
               {['tool', 'prompt'].includes(selected.type) ? (
-                <JsonField label={t('argument')} value={argument} change={setArgument} />
+                <details open={selected.type === 'prompt' ? true : undefined}>
+                  <summary>{t('argument')}</summary>
+                  <JsonField label={t('argument')} value={argument} change={setArgument} />
+                </details>
               ) : (
                 <Field label={t('uri')}>
                   <Input value={uri} onChange={(event) => setUri(event.target.value)} />

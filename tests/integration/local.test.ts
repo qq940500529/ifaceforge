@@ -31,30 +31,18 @@ function check<T>(result: Output<T>): T {
   return result.result.data;
 }
 
-it('starts a loopback UI, validates the instance and ignores cross-origin commands', async () => {
-  const { root } = project();
-  const started = check(await ifg(root, 'start', '--no-open'));
-  cleanups.push(async () => {
-    await ifg(root, 'stop');
-  });
-  expect(started.url).toMatch(/^http:\/\/127\.0\.0\.1:/);
-  expect((await fetch(started.url)).status).toBe(200);
-  expect(check(await ifg(root, 'status')).id).toBe(started.id);
-  expect(check(await ifg(root, 'start', '--no-open')).id).toBe(started.id);
-  expect(
-    (
-      await fetch(started.url + '/api/v1/commands/scan', {
-        method: 'POST',
-        headers: { Origin: 'https://outside.example' },
-      })
-    ).status,
-  ).toBe(403);
-  const other = project();
-  expect(
-    (await ifg(other.root, 'start', '--no-open', '--port', new URL(started.url).port)).result.error?.code,
-  ).toBe('PORT_IN_USE');
-  expect(check(await ifg(root, 'stop')).running).toBe(false);
-  expect(check(await ifg(root, 'status')).running).toBe(false);
+it('registers two working trees and resolves their databases by stable project ID', async () => {
+  const first = project();
+  const second = project();
+  const a = check(await ifg(first.root, 'project', 'add', first.root));
+  const b = check(await ifg(first.root, 'project', 'add', second.root));
+  expect(a.id).not.toBe(b.id);
+  expect(check(await ifg(first.root, 'project', 'list')).map((entry: { id: string }) => entry.id)).toEqual(
+    expect.arrayContaining([a.id, b.id]),
+  );
+  const status = check(await ifg(first.root, 'status'));
+  expect(status.dataDir.startsWith(first.root)).toBe(false);
+  expect(status.databaseSchema).toBe(1);
 });
 
 it('scans both frameworks, imports runtime routes and runs HTTP cases entirely through CLI', async () => {
@@ -149,8 +137,11 @@ it('scans both frameworks, imports runtime routes and runs HTTP cases entirely t
   const backup = join(root, 'database.json');
   check(await ifg(root, 'data', 'backup', '--out', backup));
   expect(check(await ifg(fastapi.root, 'case', 'list')).total).toBe(0);
-  check(await ifg(fastapi.root, 'data', 'restore', '--file', backup, '--replace'));
-  check(await ifg(fastapi.root, 'test', 'run', '--case', 'read'));
+  expect((await ifg(fastapi.root, 'data', 'restore', '--file', backup, '--replace')).result.error?.code).toBe(
+    'INVALID_ARGUMENT',
+  );
+  check(await ifg(root, 'data', 'restore', '--file', backup, '--replace'));
+  check(await ifg(root, 'test', 'run', '--case', 'read'));
   expect(execFileSync('git', ['-C', root, 'diff', '--cached', '--name-only'], { encoding: 'utf8' })).toContain(
     'openapi.yml',
   );

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveProject } from '../../src/app/project.js';
+import { locateProject, projectPaths } from '../../src/app/project.js';
 import { openProjectDatabase } from '../../src/storage/database.js';
 import { Repository } from '../../src/storage/repository.js';
 import { checkConfig } from '../../src/app/config.js';
@@ -23,7 +23,7 @@ function fixture() {
   const root = mkdtempSync(join(parent, 'ifg 目录 '));
   roots.push(root);
   execFileSync('git', ['init', '-q', root]);
-  return resolveProject(root);
+  return projectPaths(locateProject(root), join(root, '.test-data'));
 }
 
 it('rejects duplicate keys, unsupported settings, duplicate sources and escaping paths', () => {
@@ -61,6 +61,32 @@ it('merges route evidence, searches skill text and keeps the active snapshot whe
     expect(failed.complete).toBe(false);
     expect(activeSnapshot(repository)?.id).toBe(snapshot.id);
     expect(diffScans(snapshot, failed)).toMatchObject({ comparable: false, removed: [] });
+  } finally {
+    db.close();
+  }
+});
+
+it('reports real scan progress and leaves the previous snapshot intact when cancelled', () => {
+  const project = fixture();
+  writeFileSync(join(project.root, 'routes.js'), "app.get('/original', handler);");
+  const db = openProjectDatabase(project);
+  try {
+    const repository = new Repository(db);
+    const original = scanProject(project, repository, { includeUntracked: true });
+    writeFileSync(join(project.root, 'routes.js'), "app.get('/edited', handler);");
+    const stages: string[] = [];
+    expect(() =>
+      scanProject(project, repository, {
+        includeUntracked: true,
+        progress: ({ stage }) => {
+          stages.push(stage);
+        },
+        cancelled: () => stages.includes('saving'),
+      }),
+    ).toThrow('Scan cancelled');
+    expect(stages).toEqual(['enumerating', 'processing', 'saving']);
+    expect(activeSnapshot(repository)?.id).toBe(original.id);
+    expect(repository.list('scans')).toHaveLength(1);
   } finally {
     db.close();
   }

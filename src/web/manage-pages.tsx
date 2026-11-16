@@ -4,7 +4,7 @@ import type { Run, Case, Suite, Versioned } from '../app/runs.js';
 import type { Settings } from '../app/config.js';
 import type { Snapshot } from '../scanner/model.js';
 import type { Profile } from '../protocols/variables.js';
-import { command, download, WebError } from './client.js';
+import { download, unwrap, WebError } from './client.js';
 import {
   Code,
   EmptyView,
@@ -37,7 +37,7 @@ const sampleCase = {
 const sampleSuite = { schemaVersion: 1, id: '', name: '', caseIds: [] };
 
 export function TestPage() {
-  const { t, revision, refresh, notify } = useWorkspace();
+  const { t, revision, refresh, notify, command } = useWorkspace();
   const cases = useLoad(() => command<Listed<Versioned<Case>>>('case list', { limit: 500 }), [revision]);
   const suites = useLoad(() => command<Listed<Versioned<Suite>>>('suite list', { limit: 500 }), [revision]);
   const runs = useLoad(() => command<Listed<Run>>('run list', { limit: 100 }), [revision]);
@@ -87,14 +87,14 @@ export function TestPage() {
       setSaving(false);
     }
   }
-  let order: string[] = [];
-  if (tab === 'suite') {
-    try {
-      order = (parse(document) as Suite).caseIds ?? [];
-    } catch {
-      /* JSON editor displays validation on save. */
-    }
+  let draft: Case | Suite | undefined;
+  try {
+    const value = parse(document);
+    if (value && typeof value === 'object' && 'name' in value && 'id' in value) draft = value as Case | Suite;
+  } catch {
+    /* The raw editor remains usable while the document is incomplete. */
   }
+  const order = draft && 'caseIds' in draft ? draft.caseIds : [];
   function updateOrder(caseIds: string[]) {
     try {
       setDocument(json({ ...(parse(document) as Suite), caseIds }));
@@ -153,7 +153,23 @@ export function TestPage() {
             <Card size="small" title={selected?.document.name ?? t('edit')}>
               <div className="stack">
                 <ErrorView error={error} />
-                <JsonField label={t('document')} value={document} change={setDocument} rows={11} />
+                {draft && (
+                  <div className="toolbar">
+                    <Field label={t('caseId')}>
+                      <Input
+                        readOnly={!!selected}
+                        value={draft.id}
+                        onChange={(e) => setDocument(json({ ...draft, id: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label={t('name')}>
+                      <Input
+                        value={draft.name}
+                        onChange={(e) => setDocument(json({ ...draft, name: e.target.value }))}
+                      />
+                    </Field>
+                  </div>
+                )}
                 {tab === 'suite' && Array.isArray(order) && (
                   <div>
                     <Typography.Text strong>{t('caseOrder')}</Typography.Text>
@@ -185,6 +201,7 @@ export function TestPage() {
                       </div>
                     ))}
                     <Select<string | undefined>
+                      virtual={false}
                       aria-label={t('caseId')}
                       placeholder={t('selectItem')}
                       value={undefined}
@@ -198,6 +215,10 @@ export function TestPage() {
                     />
                   </div>
                 )}
+                <details open={draft ? undefined : true}>
+                  <summary>{t('document')}</summary>
+                  <JsonField label={t('document')} value={document} change={setDocument} rows={11} />
+                </details>
                 <Space wrap>
                   <Button type="primary" loading={saving} onClick={() => void save()}>
                     {t('save')}
@@ -259,27 +280,33 @@ type WikiPreview = {
 };
 type WikiExport = { id: string; out: string; locale: string; snapshot: string };
 export function WikiPage() {
-  const { t, lang, revision, refresh, notify } = useWorkspace();
+  const { t, lang, revision, refresh, notify, command, projectId } = useWorkspace();
   const [out, setOut] = useState('');
+  const [fileToken, setFileToken] = useState<string>();
   const [snapshot, setSnapshot] = useState<string>();
   const [page, setPage] = useState('README.md');
   const [preview, setPreview] = useState<WikiPreview>();
   const [activeExport, setExport] = useState<WikiExport>();
-  const [note, setNote] = useState('');
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const scans = useLoad(() => command<Listed<Snapshot>>('scan list'), [revision]);
   const exports = useLoad(() => command<Listed<WikiExport>>('wiki list'), [revision]);
   const item = preview?.catalog.items.find((item) => item.page === page);
+  const note = item ? notes[item.id] : undefined;
   useEffect(() => {
     let active = true;
-    setNote('');
-    if (item)
+    if (item && note === undefined)
       void command<{ text: string }>('wiki note-show', { id: item.id })
         .then((result) => {
-          if (active) setNote(result.text);
+          if (active)
+            setNotes((drafts) =>
+              Object.hasOwn(drafts, item.id) ? drafts : { ...drafts, [item.id]: result.text },
+            );
         })
-        .catch(setError);
+        .catch((error: unknown) => {
+          if (active) setError(error);
+        });
     return () => {
       active = false;
     };
@@ -295,7 +322,7 @@ export function WikiPage() {
       setBusy(false);
     }
   }
-  const parameters = () => ({ snapshot, out: out || undefined, lang });
+  const parameters = () => ({ snapshot, out: out || undefined, lang, fileToken });
   const load = async () => setPreview(await command('wiki preview', parameters()));
   return (
     <div className="stack">
@@ -318,12 +345,41 @@ export function WikiPage() {
             className="grow"
             value={out}
             placeholder={t('defaultOutput')}
+            readOnly={!!projectId}
             onChange={(event) => setOut(event.target.value)}
           />
-          <Button loading={busy} onClick={() => void operation(load)}>
+          {projectId && window.ifaceforge && (
+            <>
+              <Button
+                onClick={() =>
+                  void operation(async () => {
+                    const picked = await unwrap(window.ifaceforge!.chooseFile(projectId, 'wiki'));
+                    if (picked) {
+                      setOut(picked.path);
+                      setFileToken(picked.token);
+                    }
+                  })
+                }
+              >
+                {lang === 'zh-CN' ? '选择目录' : 'Choose folder'}
+              </Button>
+              {fileToken && (
+                <Button
+                  onClick={() => {
+                    setOut('');
+                    setFileToken(undefined);
+                  }}
+                >
+                  {t('defaultOutput')}
+                </Button>
+              )}
+            </>
+          )}
+          <Button data-testid="wiki-preview" loading={busy} onClick={() => void operation(load)}>
             {t('preview')}
           </Button>
           <Button
+            data-testid="wiki-build"
             type="primary"
             loading={busy}
             onClick={() =>
@@ -337,9 +393,14 @@ export function WikiPage() {
           >
             {t('build')}
           </Button>
-          {preview && <Button onClick={() => download('catalog.json', preview.catalog)}>{t('export')}</Button>}
+          {preview && (
+            <Button data-testid="wiki-export" onClick={() => download('catalog.json', preview.catalog)}>
+              {t('export')}
+            </Button>
+          )}
           {activeExport && (
             <Button
+              data-testid="wiki-open"
               onClick={() =>
                 void operation(async () => {
                   await command('wiki open', { id: activeExport.id });
@@ -385,7 +446,7 @@ export function WikiPage() {
               choose={(entry) => {
                 setExport(entry);
                 setSnapshot(entry.snapshot);
-                setOut(entry.out);
+                if (!projectId) setOut(entry.out);
                 void operation(async () => {
                   setPreview(
                     await command('wiki preview', {
@@ -408,15 +469,18 @@ export function WikiPage() {
             <Card size="small" title={t('note')}>
               <div className="stack">
                 <Input.TextArea
-                  value={note}
+                  value={note ?? ''}
+                  disabled={note === undefined || busy}
                   rows={5}
                   aria-label={t('note')}
-                  onChange={(event) => setNote(event.target.value)}
+                  onChange={(event) => setNotes((drafts) => ({ ...drafts, [item.id]: event.target.value }))}
                 />
                 <Button
                   loading={busy}
+                  disabled={note === undefined}
                   onClick={() =>
                     void operation(async () => {
+                      if (note === undefined) return;
                       await command('wiki note-put', { id: item.id, body: note });
                       await load();
                       notify(t('success'));
@@ -452,7 +516,7 @@ const sampleProfile = {
   variables: {},
 };
 export function SettingsPage() {
-  const { t, lang, project, revision, refresh, notify } = useWorkspace();
+  const { t, lang, project, revision, refresh, notify, command, projectId } = useWorkspace();
   const config = useLoad(
     () => command<{ settings: Settings; scan: Record<string, unknown>; source: string }>('config show'),
     [revision],
@@ -462,6 +526,8 @@ export function SettingsPage() {
   const [profile, setProfile] = useState(json(sampleProfile));
   const [profileId, setProfileId] = useState('');
   const [path, setPath] = useState('');
+  const [restoreFile, setRestoreFile] = useState<{ path: string; token: string }>();
+  const desktop = projectId ? window.ifaceforge : undefined;
   const [date, setDate] = useState('');
   const [preview, setPreview] = useState<{ ids: string[]; applied: boolean }>();
   const [confirm, setConfirm] = useState<'restore' | 'remove' | 'prune'>();
@@ -541,14 +607,42 @@ export function SettingsPage() {
           </Card>
           <Card size="small" title={t('maintenance')}>
             <div className="stack">
-              <Field label={t('backupPath')}>
-                <Input value={path} onChange={(event) => setPath(event.target.value)} />
-              </Field>
+              {!desktop && (
+                <Field label={t('backupPath')}>
+                  <Input value={path} onChange={(event) => setPath(event.target.value)} />
+                </Field>
+              )}
               <Space wrap>
-                <Button loading={busy} onClick={() => void operation(() => command('data backup', { out: path }))}>
+                <Button
+                  loading={busy}
+                  onClick={() =>
+                    void operation(async () => {
+                      const picked = desktop ? await unwrap(desktop.chooseFile(projectId!, 'backup')) : undefined;
+                      if (desktop && !picked) return;
+                      return command('data backup', { out: path, fileToken: picked?.token });
+                    })
+                  }
+                >
                   {t('backup')}
                 </Button>
-                <Button onClick={() => setConfirm('restore')}>{t('restore')}</Button>
+                <Button
+                  onClick={() =>
+                    void (async () => {
+                      try {
+                        const picked = desktop
+                          ? await unwrap(desktop.chooseFile(projectId!, 'restore'))
+                          : undefined;
+                        if (desktop && !picked) return;
+                        setRestoreFile(picked ?? undefined);
+                        setConfirm('restore');
+                      } catch (error) {
+                        setError(error);
+                      }
+                    })()
+                  }
+                >
+                  {t('restore')}
+                </Button>
               </Space>
               <Field label={t('cutoff')}>
                 <Input
@@ -584,7 +678,7 @@ export function SettingsPage() {
               selected={profileId}
               choose={chooseProfile}
             />
-            <JsonField label={t('document')} value={profile} change={setProfile} rows={10} />
+            <ProfileFields value={profile} change={setProfile} existing={!!profileId} />
             <Space wrap>
               <Button onClick={() => chooseProfile()}>{t('create')}</Button>
               <Button
@@ -614,7 +708,8 @@ export function SettingsPage() {
         onCancel={() => setConfirm(undefined)}
         onOk={() =>
           void operation(async () => {
-            if (confirm === 'restore') await command('data restore', { file: path, replace: true });
+            if (confirm === 'restore')
+              await command('data restore', { file: path, fileToken: restoreFile?.token, replace: true });
             else if (confirm === 'prune') await prune(true);
             else if (confirm === 'remove') {
               await command('profile remove', { id: profileId });
@@ -624,8 +719,104 @@ export function SettingsPage() {
           })
         }
       >
-        {confirm === 'restore' ? path : confirm === 'prune' ? preview?.ids.length : profileId}
+        {confirm === 'restore'
+          ? (restoreFile?.path ?? path)
+          : confirm === 'prune'
+            ? preview?.ids.length
+            : profileId}
       </Modal>
+    </div>
+  );
+}
+
+function ProfileFields({
+  value,
+  change,
+  existing,
+}: {
+  value: string;
+  change: (value: string) => void;
+  existing: boolean;
+}) {
+  const { t, lang } = useWorkspace();
+  const label = (en: string, zh: string) => (lang === 'zh-CN' ? zh : en);
+  let profile: Profile | undefined;
+  try {
+    const draft = parse(value) as Partial<Profile> | null;
+    if (draft && typeof draft.id === 'string' && typeof draft.name === 'string') profile = draft as Profile;
+  } catch {
+    // The JSON editor remains available for correcting invalid input.
+  }
+  const update = (fields: Partial<Profile>) => change(json({ ...profile, ...fields }));
+  const mcp = profile?.mcp;
+  return (
+    <div className="stack">
+      {profile && (
+        <>
+          <div className="toolbar">
+            <Field label={label('Profile ID', '环境 ID')}>
+              <Input
+                readOnly={existing}
+                value={profile.id}
+                onChange={(event) => update({ id: event.target.value })}
+              />
+            </Field>
+            <Field label={t('name')}>
+              <Input value={profile.name} onChange={(event) => update({ name: event.target.value })} />
+            </Field>
+          </div>
+          <Field label={label('HTTP base URL', 'HTTP 基础 URL')}>
+            <Input
+              value={profile.http?.baseUrl ?? ''}
+              onChange={(event) =>
+                update({
+                  http: { ...profile?.http, baseUrl: event.target.value || undefined },
+                })
+              }
+            />
+          </Field>
+          <Field label={label('MCP transport', 'MCP 传输方式')}>
+            <Select
+              aria-label={label('MCP transport', 'MCP 传输方式')}
+              value={mcp?.transport}
+              placeholder={label('Select transport', '选择传输方式')}
+              options={[
+                { value: 'stdio', label: 'stdio' },
+                { value: 'streamableHttp', label: 'Streamable HTTP' },
+              ]}
+              allowClear
+              virtual={false}
+              onChange={(transport: 'stdio' | 'streamableHttp' | undefined) =>
+                update({
+                  mcp:
+                    transport === 'stdio'
+                      ? { transport, command: '' }
+                      : transport === 'streamableHttp'
+                        ? { transport, url: '' }
+                        : undefined,
+                })
+              }
+            />
+          </Field>
+          {mcp?.transport === 'stdio' && (
+            <Field label={label('Executable', '可执行程序')}>
+              <Input
+                value={mcp.command}
+                onChange={(event) => update({ mcp: { ...mcp, command: event.target.value } })}
+              />
+            </Field>
+          )}
+          {mcp?.transport === 'streamableHttp' && (
+            <Field label={label('MCP URL', 'MCP 地址')}>
+              <Input value={mcp.url} onChange={(event) => update({ mcp: { ...mcp, url: event.target.value } })} />
+            </Field>
+          )}
+        </>
+      )}
+      <details open={profile ? undefined : true}>
+        <summary>{t('document')}</summary>
+        <JsonField label={t('document')} value={value} change={change} rows={10} />
+      </details>
     </div>
   );
 }

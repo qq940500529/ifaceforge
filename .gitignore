@@ -5,6 +5,8 @@ release/
 __pycache__/
 .venv/
 playwright-report/
+playwright-desktop-report/
+artifacts/
 test-results/
 .devtools/
 .env

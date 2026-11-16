@@ -1,9 +1,8 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { minimatch } from 'minimatch';
-import type { ProjectPaths } from './project.js';
-import { effectiveConfig, type Adapter, type SourceConfig } from './config.js';
+import { git, type ProjectPaths } from './project.js';
+import { effectiveConfig, type Adapter, type ScanConfig, type SourceConfig } from './config.js';
 import { digest, parseJson, projectFile, sourceText, stableJson } from './files.js';
 import { AppError, invalid } from './errors.js';
 import type { Repository } from '../storage/repository.js';
@@ -42,14 +41,6 @@ interface ScanFile {
   diagnostics: Diagnostic[];
 }
 
-function git(project: ProjectPaths, args: string[]) {
-  return execFileSync('git', ['-C', project.root, ...args], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    maxBuffer: 32 * 1024 * 1024,
-  });
-}
-
 function configured(path: string, entry: SourceConfig) {
   if (entry.openapi?.includes(path) || entry.mcpConfigs?.includes(path)) return true;
   return (
@@ -67,6 +58,7 @@ function scanPath(
   text: string,
   source: SourceConfig,
   diagnostics: Diagnostic[],
+  checkpoint?: () => void,
 ) {
   if (/(^|\/)SKILL\.md$/.test(path)) return [parseSkill(project.root, path, text, diagnostics)];
   if (source.mcpConfigs?.includes(path) || /(^|\/)\.mcp\.json$/.test(path)) {
@@ -84,18 +76,28 @@ function scanPath(
   ) {
     return parseOpenApi(text, { root: project.root, path, service: source.id }, diagnostics);
   }
-  return scanSource(path, text, source.adapters ?? adapters, source.id, diagnostics);
+  return scanSource(path, text, source.adapters ?? adapters, source.id, diagnostics, checkpoint);
 }
 
-export function mergeObservations(observations: Observation[], runtime: RuntimeObservation[] = []): Entity[] {
-  const groups = new Map<string, Observation[]>();
-  for (const item of observations) {
-    const group = groups.get(item.id) ?? [];
-    if (!group.some((entry) => stableJson(entry) === stableJson(item))) group.push(item);
-    groups.set(item.id, group);
+export function mergeObservations(
+  observations: Observation[],
+  runtime: RuntimeObservation[] = [],
+  checkpoint?: () => void,
+): Entity[] {
+  const groups = new Map<string, Map<string, Observation>>();
+  for (const [index, item] of observations.entries()) {
+    if (index % 256 === 0) checkpoint?.();
+    let group = groups.get(item.id);
+    if (!group) {
+      group = new Map();
+      groups.set(item.id, group);
+    }
+    const identity = stableJson(item);
+    if (!group.has(identity)) group.set(identity, item);
   }
   return [...groups.values()]
-    .map((group) => {
+    .map((entries) => {
+      const group = [...entries.values()];
       const first = group.find((entry) => entry.origin === 'declaration') ?? group[0];
       const sources = new Set(group.map((entry) => entry.origin));
       const differences: string[] = [];
@@ -134,12 +136,33 @@ export function mergeObservations(observations: Observation[], runtime: RuntimeO
     .sort((a, b) => a.id.localeCompare(b.id, 'en'));
 }
 
-export function scanProject(
-  project: ProjectPaths,
-  repository: Repository,
-  options: { full?: boolean; includeUntracked?: boolean } = {},
-): Snapshot {
-  const { scan } = effectiveConfig(project, repository);
+export interface ScanProgress {
+  stage: 'enumerating' | 'processing' | 'saving';
+  processed: number;
+  total?: number;
+  warnings: number;
+}
+
+export interface ScanOptions {
+  full?: boolean;
+  includeUntracked?: boolean;
+  progress?: (status: ScanProgress) => void;
+  cancelled?: () => boolean;
+  tracked?: { paths: string; commit: string | null };
+  scan?: ScanConfig;
+}
+
+export function trackedFiles(include: boolean) {
+  return ['ls-files', '-z', '--cached', ...(include ? ['--others', '--exclude-standard'] : [])];
+}
+
+export function scanProject(project: ProjectPaths, repository: Repository, options: ScanOptions = {}): Snapshot {
+  const check = () => {
+    if (options.cancelled?.()) throw new AppError('SCAN_CANCELLED', 'Scan cancelled');
+  };
+  options.progress?.({ stage: 'enumerating', processed: 0, warnings: 0 });
+  check();
+  const scan = options.scan ?? effectiveConfig(project, repository).scan;
   const include = options.includeUntracked ?? scan.includeUntracked ?? false;
   const sources = (scan.sources?.length ? scan.sources : [{ id: 'default' }]).map((entry) => ({
     ...entry,
@@ -149,9 +172,7 @@ export function scanProject(
   }));
   const scope = digest(stableJson({ scan, include, scannerVersion }));
   const paths = new Set(
-    git(project, ['ls-files', '-z', '--cached', ...(include ? ['--others', '--exclude-standard'] : [])])
-      .split('\0')
-      .filter(Boolean),
+    (options.tracked?.paths ?? git(project.root, trackedFiles(include))).split('\0').filter(Boolean),
   );
   const selectedFiles = new Set(
     sources.flatMap((source) => [...(source.openapi ?? []), ...(source.mcpConfigs ?? [])]),
@@ -162,7 +183,16 @@ export function scanProject(
   const cache: [string, ScanFile][] = [];
   const hashes: [string, string][] = [];
   let complete = true;
-  for (const path of [...paths].sort()) {
+  const files = [...paths].sort();
+  let processed = 0;
+  let reportedAt = 0;
+  for (const path of files) {
+    check();
+    if (processed === 0 || Date.now() - reportedAt >= 100) {
+      options.progress?.({ stage: 'processing', processed, total: files.length, warnings: diagnostics.length });
+      reportedAt = Date.now();
+    }
+    processed++;
     const scopeSources = sources.filter((entry) => configured(path, entry));
     if (
       !scopeSources.length ||
@@ -186,13 +216,16 @@ export function scanProject(
         old?.digest === hash && !mayReference ? old : { digest: hash, diagnostics: [], observations: [] };
       if (old !== file) {
         for (const source of scopeSources) {
-          file.observations.push(...scanPath(project, path, text, source, file.diagnostics));
+          for (const item of scanPath(project, path, text, source, file.diagnostics, check)) {
+            file.observations.push(item);
+          }
         }
         cache.push([key, file]);
       }
-      diagnostics.push(...file.diagnostics);
-      observations.push(...file.observations);
+      for (const item of file.diagnostics) diagnostics.push(item);
+      for (const item of file.observations) observations.push(item);
     } catch (error) {
+      check();
       complete = false;
       diagnostics.push({
         path,
@@ -201,11 +234,13 @@ export function scanProject(
       });
     }
   }
-  let commit: string | null = null;
-  try {
-    commit = git(project, ['rev-parse', '--verify', 'HEAD']).trim();
-  } catch {
-    // A freshly initialized Git project has no commit.
+  let commit = options.tracked?.commit ?? null;
+  if (!options.tracked) {
+    try {
+      commit = git(project.root, ['rev-parse', '--verify', 'HEAD']).trim();
+    } catch {
+      // A freshly initialized Git project has no commit.
+    }
   }
   const snapshot: Snapshot = {
     id: randomUUID(),
@@ -215,14 +250,18 @@ export function scanProject(
     complete,
     diagnostics,
     worktree: digest(stableJson(hashes)),
-    entities: mergeObservations(observations),
+    entities: [],
   };
+  options.progress?.({ stage: 'saving', processed, total: files.length, warnings: diagnostics.length });
+  check();
   repository.transaction(() => {
     const runtime = repository.list<RuntimeObservation>('observations');
     snapshot.entities = mergeObservations(
       [...observations, ...runtime.flatMap((target) => target.observations)],
       runtime,
+      check,
     );
+    check();
     for (const [key, file] of cache) repository.put('scan_files', key, file);
     repository.put('scans', snapshot.id, snapshot);
     if (complete) repository.set('activeSnapshot', snapshot.id);

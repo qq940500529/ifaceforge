@@ -1,26 +1,22 @@
 import { mkdirSync } from 'node:fs';
-import { relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { projectFile } from '../app/files.js';
 import type { ProjectPaths } from '../app/project.js';
 
-const schemaVersion = 2;
+export const desktopDatabaseVersion = 1;
+export const desktopDatabaseId = 0x49464744;
 
 export function openProjectDatabase(project: ProjectPaths): DatabaseSync {
-  projectFile(project.root, relative(project.root, project.database), false);
-  mkdirSync(project.data, { recursive: true });
-  const database = new DatabaseSync(project.database, { timeout: 2_000 });
+  mkdirSync(project.data, { recursive: true, mode: 0o700 });
+  const path = projectFile(project.data, 'workbench.sqlite', false);
+  const database = new DatabaseSync(path, { timeout: 2500 });
   try {
     database.exec('PRAGMA foreign_keys = ON; BEGIN IMMEDIATE');
-    const version = Number(database.prepare('PRAGMA user_version').get()?.user_version ?? 0);
-    if (version > schemaVersion) {
-      throw new Error(`Database version ${version} requires a newer release of IfaceForge.`);
-    }
-    if (version < 1) {
-      database.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT');
-    }
-    if (version < 2) {
+    const version = Number(database.prepare('PRAGMA user_version').get()?.user_version);
+    const identifier = Number(database.prepare('PRAGMA application_id').get()?.application_id);
+    if (version === 0 && identifier === 0) {
       database.exec(`
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
         CREATE TABLE records (
           collection TEXT NOT NULL,
           id TEXT NOT NULL,
@@ -29,8 +25,11 @@ export function openProjectDatabase(project: ProjectPaths): DatabaseSync {
           PRIMARY KEY (collection, id)
         ) STRICT;
         CREATE INDEX records_updated ON records(collection, updated);
-        PRAGMA user_version = 2;
+        PRAGMA application_id = ${desktopDatabaseId};
+        PRAGMA user_version = ${desktopDatabaseVersion};
       `);
+    } else if (version !== desktopDatabaseVersion || identifier !== desktopDatabaseId) {
+      throw new Error('Unrecognized IfaceForge desktop database.');
     }
     database.exec('COMMIT');
     return database;

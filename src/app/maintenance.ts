@@ -9,17 +9,18 @@ import {
   renameSync,
   mkdirSync,
 } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { AppError, invalid } from './errors.js';
 import { digest, isInside, parseJson, projectFile } from './files.js';
 import type { ProjectPaths } from './project.js';
+import { desktopDatabaseId, desktopDatabaseVersion } from '../storage/database.js';
 import type { Repository } from '../storage/repository.js';
 import type { Run } from './runs.js';
 
 const maxBackup = 512 * 1024 * 1024;
 const managedNotes = /^[^/\\]+\.md$/i;
 function notesDir(project: ProjectPaths) {
-  return projectFile(project.root, relative(project.root, join(project.data, 'wiki-notes')), false);
+  return projectFile(project.data, 'wiki-notes', false);
 }
 
 function writeAtomic(path: string, contents: string) {
@@ -46,14 +47,12 @@ export async function backupData(project: ProjectPaths, repository: Repository, 
       ? Object.fromEntries(
           readdirSync(dir)
             .filter((name) => managedNotes.test(name))
-            .map((name) => [
-              name,
-              readFileSync(projectFile(project.root, relative(project.root, join(dir, name))), 'utf8'),
-            ]),
+            .map((name) => [name, readFileSync(projectFile(dir, name), 'utf8')]),
         )
       : {};
     const archive = JSON.stringify({
-      format: 'ifaceforge-backup',
+      format: 'ifaceforge-desktop-backup',
+      project: basename(project.data),
       schemaVersion: 1,
       sha256: digest(data),
       sqlite: data.toString('base64'),
@@ -73,13 +72,14 @@ export function restoreData(project: ProjectPaths, repository: Repository, file:
   const archive = parseJson(input.toString('utf8')) as {
     format: string;
     schemaVersion: number;
+    project: string;
     sha256: string;
     sqlite: string;
     notes: Record<string, string>;
   };
   if (
     !archive ||
-    archive.format !== 'ifaceforge-backup' ||
+    archive.format !== 'ifaceforge-desktop-backup' ||
     archive.schemaVersion !== 1 ||
     typeof archive.sqlite !== 'string' ||
     !archive.notes ||
@@ -87,6 +87,7 @@ export function restoreData(project: ProjectPaths, repository: Repository, file:
     typeof archive.notes !== 'object'
   )
     invalid('Invalid IfaceForge backup');
+  if (archive.project !== basename(project.data)) invalid('This backup belongs to a different project');
   const sqlite = Buffer.from(archive.sqlite, 'base64');
   if (digest(sqlite) !== archive.sha256) invalid('Backup checksum mismatch');
   const notes = Object.entries(archive.notes);
@@ -112,9 +113,11 @@ export function restoreData(project: ProjectPaths, repository: Repository, file:
     try {
       const integrity = copy.prepare('PRAGMA quick_check').get()?.quick_check;
       const version = Number(copy.prepare('PRAGMA user_version').get()?.user_version);
-      if (integrity !== 'ok' || ![1, 2].includes(version)) invalid('Unrecognized database backup');
+      const identifier = Number(copy.prepare('PRAGMA application_id').get()?.application_id);
+      if (integrity !== 'ok' || version !== desktopDatabaseVersion || identifier !== desktopDatabaseId)
+        invalid('Unrecognized database backup');
       settings = copy.prepare('SELECT key, value FROM settings').all();
-      records = version === 2 ? copy.prepare('SELECT collection, id, value, updated FROM records').all() : [];
+      records = copy.prepare('SELECT collection, id, value, updated FROM records').all();
     } finally {
       copy.close();
     }

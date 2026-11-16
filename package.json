@@ -1,8 +1,10 @@
 {
   "name": "ifaceforge",
-  "version": "0.1.0",
+  "version": "0.2.0-preview.1",
   "private": true,
-  "description": "A local workbench for repository APIs, MCP servers, and skills",
+  "description": "A desktop workbench for repository APIs, MCP servers, and skills",
+  "homepage": "https://github.com/qq940500529/ifaceforge",
+  "main": "./dist/desktop/main.js",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -17,11 +19,15 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
-    "format": "prettier --write src tests fixtures scripts .github README.md CONTRIBUTING.md docs/cli.md docs/release.md *.config.* tsconfig*.json package.json",
-    "format:check": "prettier --check src tests fixtures scripts .github README.md CONTRIBUTING.md docs/cli.md docs/release.md *.config.* tsconfig*.json package.json",
+    "test:desktop": "playwright test -c playwright.desktop.config.ts",
+    "format": "prettier --write src tests fixtures scripts .github README.md CONTRIBUTING.md SECURITY.md AGENTS.md docs/*.md electron-builder.yml *.config.* tsconfig*.json package.json",
+    "format:check": "prettier --check src tests fixtures scripts .github README.md CONTRIBUTING.md SECURITY.md AGENTS.md docs/*.md electron-builder.yml *.config.* tsconfig*.json package.json",
     "lint": "eslint fixtures scripts *.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck",
-    "package": "node scripts/package.mjs"
+    "start": "electron .",
+    "package": "electron-builder --publish never",
+    "package:dir": "electron-builder --dir --publish never",
+    "package:cli": "node scripts/package.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/node": "2.1.2",
@@ -33,6 +39,9 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "antd": "6.7.1",
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0",
+    "express": "5.3.0",
     "eslint": "10.15.0",
     "prettier": "3.10.1",
     "react": "19.3.1",
@@ -47,7 +56,6 @@
     "@modelcontextprotocol/client": "2.4.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "express": "5.3.0",
     "jsonc-parser": "3.3.1",
     "minimatch": "11.0.8",
     "yaml": "2.9.1"

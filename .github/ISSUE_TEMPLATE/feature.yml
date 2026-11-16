@@ -1,0 +1,11 @@
+name: Feature request
+description: Suggest a change to the desktop workbench or CLI
+body:
+  - type: textarea
+    attributes:
+      label: What would you like to do?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: How do you do this today?

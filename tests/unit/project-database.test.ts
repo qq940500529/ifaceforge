@@ -1,26 +1,26 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveProject } from '../../src/app/project.js';
-import { openProjectDatabase } from '../../src/storage/database.js';
+import { locateProject } from '../../src/app/project.js';
+import { desktopDatabaseId, openProjectDatabase } from '../../src/storage/database.js';
+import { Projects } from '../../src/storage/projects.js';
 
 const fixtures: string[] = [];
 const fixtureParent = realpathSync.native(tmpdir());
 
-function makeDirectory(): string {
+function makeDirectory() {
   const directory = mkdtempSync(join(fixtureParent, 'ifaceforge 测试 '));
   fixtures.push(directory);
   return directory;
 }
-
-function makeProject(): string {
-  const project = makeDirectory();
+function makeProject() {
+  const project = join(makeDirectory(), 'worktree');
+  mkdirSync(project);
   execFileSync('git', ['-C', project, 'init', '--quiet'], { stdio: 'ignore' });
   return project;
 }
-
 afterEach(() => {
   for (const fixture of fixtures.splice(0)) {
     const resolved = realpathSync.native(fixture);
@@ -30,45 +30,65 @@ afterEach(() => {
 });
 
 describe('project storage', () => {
-  it('finds the Git root from a child directory containing spaces and Chinese characters', () => {
+  it('reuses the same registration for a child directory and keeps data outside the worktree', () => {
     const root = makeProject();
     const nested = join(root, '测试 subdirectory');
     mkdirSync(nested);
-    const project = resolveProject(nested);
-    expect(project.root).toBe(realpathSync.native(root));
-    expect(project.database).toBe(join(project.root, '.devtools', 'ifaceforge', 'data', 'workbench.sqlite'));
+    const projects = new Projects(makeDirectory());
+    try {
+      const record = projects.add(nested);
+      expect(record.root).toBe(realpathSync.native(root));
+      expect(projects.add(root).id).toBe(record.id);
+      expect(projects.paths(record.id).database).toBe(
+        join(projects.home, 'projects', record.id, 'workbench.sqlite'),
+      );
+    } finally {
+      projects.close();
+    }
   });
-
   it('reports a useful error outside a Git worktree', () => {
-    expect(() => resolveProject(makeDirectory())).toThrow(/Not inside a Git working tree/);
+    expect(() => locateProject(makeDirectory())).toThrow(/Not inside a Git working tree/);
   });
-
-  it('initializes on demand and persists settings across database opens', () => {
-    const project = resolveProject(makeProject());
-    let database = openProjectDatabase(project);
+  it('persists settings across database opens and isolates different worktrees', () => {
+    const projects = new Projects(makeDirectory());
+    const a = projects.paths(projects.add(makeProject()).id);
+    const b = projects.paths(projects.add(makeProject()).id);
+    let database = openProjectDatabase(a);
+    const other = openProjectDatabase(b);
     try {
-      database.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('locale', 'zh-CN');
-    } finally {
+      database.prepare('INSERT INTO settings VALUES (?, ?)').run('locale', 'zh-CN');
       database.close();
-    }
-    database = openProjectDatabase(project);
-    try {
+      database = openProjectDatabase(a);
       expect(database.prepare('SELECT value FROM settings WHERE key = ?').get('locale')?.value).toBe('zh-CN');
-      expect(database.prepare('PRAGMA user_version').get()?.user_version).toBe(2);
+      expect(other.prepare('SELECT value FROM settings WHERE key = ?').get('locale')).toBeUndefined();
+      expect(database.prepare('PRAGMA application_id').get()?.application_id).toBe(desktopDatabaseId);
     } finally {
       database.close();
+      other.close();
+      projects.close();
     }
   });
-
-  it('opens a separate database for each project', () => {
-    const first = openProjectDatabase(resolveProject(makeProject()));
-    const second = openProjectDatabase(resolveProject(makeProject()));
+  it('hides, relocates and deletes managed data while preserving source files', () => {
+    const projects = new Projects(makeDirectory());
+    const root = makeProject();
+    const moved = join(dirname(root), 'moved worktree');
     try {
-      first.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('locale', 'zh-CN');
-      expect(second.prepare('SELECT value FROM settings WHERE key = ?').get('locale')).toBeUndefined();
+      const { id } = projects.add(root);
+      const paths = projects.paths(id);
+      openProjectDatabase(paths).close();
+      projects.hide(id);
+      expect(projects.list()[0].hidden).toBe(1);
+      expect(projects.add(root).id).toBe(id);
+      renameSync(root, moved);
+      expect(projects.list()[0].available).toBe(false);
+      expect(() => projects.relocate(id, makeProject())).toThrow(/original worktree/);
+      expect(projects.relocate(id, moved).available).toBe(true);
+      expect(projects.paths(id).database).toBe(paths.database);
+      projects.delete(id);
+      expect(existsSync(paths.data)).toBe(false);
+      expect(existsSync(join(moved, '.git'))).toBe(true);
     } finally {
-      first.close();
-      second.close();
+      projects.close();
     }
   });
 });

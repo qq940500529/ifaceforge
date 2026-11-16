@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { failure, invalid } from '../app/errors.js';
 import { parseJson, readJson } from '../app/files.js';
-import { resolveProject } from '../app/project.js';
+import { Projects } from '../storage/projects.js';
+import { locateProject } from '../app/project.js';
 import { Workbench, type CommandInput } from '../app/workbench.js';
 import { openProjectDatabase } from '../storage/database.js';
 import { Repository } from '../storage/repository.js';
 import { schemas } from '../schemas/index.js';
 import { booleanOptions, commands, globalOptions } from './commands.js';
-import { instanceResult, openLocation, version } from '../server/instance.js';
-import { serve } from '../server/web.js';
+import { openLocation, version } from '../app/platform.js';
 import type { Run } from '../app/runs.js';
 
 function envelope(command: string, data: unknown, error: unknown = null) {
@@ -21,6 +21,7 @@ async function main() {
   const raw = process.argv.slice(2);
   const json = raw.includes('--json');
   let name = '';
+  let registry: Projects | undefined;
   let repository: Repository | undefined;
   let workbench: Workbench | undefined;
   const output = (data: unknown) =>
@@ -67,7 +68,8 @@ async function main() {
       name = 'help';
       const usage = desc
         ? desc.usage
-        : 'Usage: ifg <command> [--project <path>] [--json]\n\n' + commands.map((entry) => entry.usage).join('\n');
+        : 'Usage: ifg <command> [--project <id|directory>] [--json]\n\n' +
+          commands.map((entry) => entry.usage).join('\n');
       if (json) output({ usage });
       else process.stdout.write(usage + '\n');
       return;
@@ -88,7 +90,7 @@ async function main() {
       if (!desc.options.includes(key)) invalid('Unsupported option for ' + name, { key });
       const value = values[key];
       const field = key.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
-      if (['limit', 'offset', 'port', 'version'].includes(key)) {
+      if (['limit', 'offset', 'version'].includes(key)) {
         if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
           invalid('Expected numeric option', { key });
         input[field] = Number(value);
@@ -114,27 +116,24 @@ async function main() {
       if (input.file === '-' && input.args === '-') invalid('stdin can only be read once');
       input.args = input.args.trimStart().startsWith('{') ? parseJson(input.args) : readJson(input.args);
     }
-    const project = resolveProject(typeof values.project === 'string' ? values.project : process.cwd());
-    repository = new Repository(openProjectDatabase(project));
-    workbench = new Workbench(project, repository);
-    if (name === 'start' && input.foreground) {
-      if (input.port === 0) invalid('Explicit port must be between 1 and 65535');
-      const server = await serve(workbench, input.port as number | undefined);
-      process.send?.({ instance: server.instance });
-      process.on('SIGINT', () => {
-        void server.stop();
-      });
-      process.on('SIGTERM', () => {
-        void server.stop();
-      });
-      if (!input.noOpen) openLocation(server.instance.url);
-      output({ project: project.root, ...instanceResult(server.instance) });
-      await server.finished;
+    registry = new Projects();
+    if (name === 'project list') {
+      output(registry.list());
       return;
     }
+    if (name === 'project add') {
+      output(registry.add(String(input.id)));
+      return;
+    }
+    const selector = typeof values.project === 'string' ? values.project : process.cwd();
+    const record = registry.list().find((item) => item.id === selector);
+    const id = record?.id ?? registry.add(locateProject(selector)).id;
+    repository = new Repository(openProjectDatabase(registry.paths(id)));
+    workbench = new Workbench(registry.paths(id), repository);
     process.on('SIGINT', interrupt);
     process.on('SIGTERM', interrupt);
     const data = await workbench.execute(name, input as CommandInput);
+    if (name === 'wiki open') openLocation((data as { out: string }).out);
     const run = data as Partial<Run> | undefined;
     if (run?.exitCode && !['run show', 'run export', 'run cancel'].includes(name)) {
       process.exitCode = run.exitCode;
@@ -162,7 +161,9 @@ async function main() {
   } finally {
     process.removeListener('SIGINT', interrupt);
     process.removeListener('SIGTERM', interrupt);
+    await workbench?.executor.close();
     repository?.db.close();
+    registry?.close();
   }
 }
 

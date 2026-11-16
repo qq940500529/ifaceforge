@@ -1,50 +1,35 @@
-# 接口工坊 · IfaceForge
+# IfaceForge · 接口工坊
 
-接口工坊是一个面向单个 Git 项目的本地工作台。扫描 OpenAPI、MCP 配置、有限的源码路由和 `SKILL.md`，调试 HTTP 和 MCP，保存用例并导出 Markdown Wiki。Web 界面支持简体中文和英文，CLI `ifg` 可直接读写同一项目的 SQLite。
+**在一个桌面窗口里浏览、调试和测试多个 Git 项目的接口。**
 
-IfaceForge is a local workbench for a single Git project. Discover HTTP APIs, MCP capabilities and skills, debug requests, run saved cases, and export a Markdown Wiki. The bilingual Web interface and the CLI share a project SQLite database.
+[![Verify](https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml/badge.svg)](https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-![IfaceForge catalog](docs/assets/catalog.png)
+[下载安装包](https://github.com/qq940500529/ifaceforge/releases) · [English](docs/README.en.md) · [使用手册](docs/workbench.md) · [CLI](docs/cli.md) · [参与贡献](CONTRIBUTING.md)
 
-## 快速启动 · Quick start
+## 三步开始
 
-需要 Git 和 Node.js 26 LTS。兼容 Node.js 24 LTS，实际验收版本见发布报告。
+1. 从 [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases) 下载与你的系统、架构对应的桌面预览包。Windows 安装向导支持选择安装目录。macOS 从 DMG 拖放应用。Linux 可选 AppImage、DEB 或 RPM。
+2. 打开 IfaceForge，点击 **添加项目**，选择本机 Git 工作树中的文件夹。选择子目录时，界面会请你确认 Git 工作树根。先安装 Git，并确保应用能从 `PATH` 找到它。
+3. 点击 **扫描项目**。页内浮窗显示阶段和进度。扫描时可以收起浮窗、取消任务或切换项目。打开 **目录** 查看发现的能力。
 
-Requires Git and Node.js 26 LTS. See the release report for verified versions, including Node.js 24 LTS.
+![IfaceForge 桌面工作台中的扫描结果](docs/assets/catalog.png)
 
-```sh
-git clone https://github.com/qq940500529/ifaceforge.git
-cd ifaceforge
-npm ci
-npm run build
-node dist/cli/main.js start --no-open --json
-```
+## 工作台
 
-打开输出中的 `data.url`。使用 `--project <path>` 指向其他 Git 工作树。省略 `--no-open` 会打开浏览器。使用 `status` 查看状态，使用 `stop` 停止工作台。
+| 界面       | 常用操作                                                                  |
+| ---------- | ------------------------------------------------------------------------- |
+| 目录和技能 | 搜索、筛选、查看来源和定义。技能可以阅读正文和本地引用。                  |
+| HTTP API   | 导入 OpenAPI，编辑和发送请求，检查响应与断言，导出接口定义。              |
+| MCP        | 使用环境配置连接 stdio 或 Streamable HTTP，发现并调用工具、资源和提示词。 |
+| 测试       | 保存请求为用例，构建套件，执行、取消和导出运行报告。                      |
+| Wiki       | 预览、添加人工说明，生成 Markdown 和 JSON。                               |
+| 项目设置   | 配置扫描、环境、备份、恢复和历史清理。                                    |
 
-Open `data.url` from the result. Add `--project <path>` for another Git worktree. Omit `--no-open` to open the browser. Use `status` and `stop` to manage the service.
+每个项目拥有独立 SQLite 数据库，安装目录、应用数据目录和 Git 工作树可以分别管理。桌面应用随包提供运行时。需要在终端调用时，可用同一数据目录下的 [`ifg`](docs/cli.md)。
 
-解压发行包后，可直接运行 `node <path-to-package>/dist/cli/main.js start --project <path>`。发行包自带依赖。
+[系统和数据目录](docs/workbench.md) · [构建、测试和发行](docs/release.md) · [开发规格](docs/development-spec.md)
 
-The release archive includes dependencies. Extract it and start with `node <path-to-package>/dist/cli/main.js start --project <path>`.
+## 许可证
 
-## CLI
-
-```sh
-npm link
-ifg commands --json
-ifg scan --project . --include-untracked --json
-ifg catalog search task --json
-ifg wiki build --lang zh-CN --json
-```
-
-项目数据位于 `.devtools/ifaceforge/data/`。工作台只绑定回环地址。扫描不执行发现的项目代码。实际连接 MCP 时只启动用户明确选择的配置。
-
-Project data lives in `.devtools/ifaceforge/data/`. The workbench binds to loopback. Scanning is read only. Connecting to an MCP server uses the profile you explicitly choose.
-
-- [CLI usage](docs/cli.md)
-- [Development specification](docs/development-spec.md)
-- [Release and verification](docs/release.md)
-- [Contributing](CONTRIBUTING.md)
-
-MIT · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司. [License](LICENSE)
+[MIT](LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司

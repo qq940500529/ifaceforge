@@ -1,7 +1,7 @@
 import { Button, Card, Input, Pagination, Select, Space, Tabs, Typography } from 'antd';
 import { useEffect, useState } from 'react';
+import { copyText } from './client.js';
 import type { Entity, Kind, Observation } from '../scanner/model.js';
-import { command } from './client.js';
 import {
   Code,
   EmptyView,
@@ -16,7 +16,7 @@ import {
 } from './components.js';
 
 export function useCatalog(kind?: Kind) {
-  const { revision } = useWorkspace();
+  const { revision, command } = useWorkspace();
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
   const [service, setService] = useState('');
@@ -151,6 +151,10 @@ export function CatalogList({
             name={(entity) => (
               <div>
                 <strong>{entity.name}</strong>
+                <div className="result-source" title={entity.observations[0]?.path}>
+                  {entity.service}
+                  {entity.observations[0]?.path ? ' · ' + entity.observations[0].path : ''}
+                </div>
                 <div>
                   <Label value={entity.kind} />
                   {[...new Set(entity.observations.map((item) => item.origin))].map((origin) => (
@@ -200,10 +204,7 @@ function Origins({ observations }: { observations: Observation[] }) {
                 <Button size="small" onClick={() => showSource(entry.path!, entry.line)}>
                   {t('openSource')}
                 </Button>
-                <Button
-                  size="small"
-                  onClick={() => void navigator.clipboard.writeText(entry.path!).then(() => notify(t('copied')))}
-                >
+                <Button size="small" onClick={() => void copyText(entry.path!).then(() => notify(t('copied')))}>
                   {t('copyPath')}
                 </Button>
               </>

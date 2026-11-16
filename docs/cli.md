@@ -1,6 +1,6 @@
 # IfaceForge CLI
 
-Run commands in a Git working tree, or supply `--project <path>`. With a source build, replace `ifg` below with `node /path/to/ifaceforge/dist/cli/main.js`, or run `npm link` from the built IfaceForge repository to register the command.
+Run commands in a Git working tree, or supply `--project <id|directory>`. The CLI uses the desktop app's registry and project data. With a source build, replace `ifg` below with `node /path/to/ifaceforge/dist/cli/main.js`, or run `npm link` from the built IfaceForge repository to register the command.
 
 ## Discover the contract
 
@@ -19,9 +19,9 @@ ifg schema suite
 ## Inspect a project
 
 ```sh
-ifg start --no-open --json
-ifg status --json
-ifg stop --json
+ifg project add ./path-to-worktree --json
+ifg project list --json
+ifg status --project <project-id> --json
 ifg config show --json
 ifg config validate --file .ifaceforge.json --json
 ifg config apply --file settings.json --json

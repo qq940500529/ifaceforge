@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import ReactMarkdown from 'react-markdown';
 import type { Run } from '../app/runs.js';
 import type { Profile } from '../protocols/variables.js';
-import { command, download, WebError } from './client.js';
+import { type command, download, WebError } from './client.js';
 import { type Key, type Language, translator, translatedKey } from './i18n.js';
 
 export interface Project {
@@ -15,6 +15,8 @@ export interface Project {
 }
 export type Listed<T> = { items: T[]; total: number; limit: number; offset: number };
 export interface Context {
+  command: typeof command;
+  projectId?: string;
   lang: Language;
   t: ReturnType<typeof translator>;
   project: Project;
@@ -157,7 +159,7 @@ export function Label({ value }: { value: string }) {
 }
 
 export function useProfiles() {
-  const { revision } = useWorkspace();
+  const { revision, command } = useWorkspace();
   return useLoad(() => command<Listed<Profile>>('profile list', { limit: 500 }), [revision]);
 }
 
@@ -186,7 +188,7 @@ export function ProfilePicker({
 }
 
 export function useRun() {
-  const { refresh } = useWorkspace();
+  const { refresh, command } = useWorkspace();
   const [run, setRun] = useState<Run>();
   const [error, setError] = useState<unknown>();
   const [pending, setPending] = useState(false);

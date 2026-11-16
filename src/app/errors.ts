@@ -20,6 +20,7 @@ export function failure(error: unknown) {
   if (code === 'INVALID_PROJECT' || code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
     return new AppError('INVALID_ARGUMENT', message, 2);
   }
+  if (code === 'GIT_UNAVAILABLE') return new AppError(code, message);
   if ((error as { errcode?: number } | null)?.errcode === 5) return new AppError('BUSY', message);
   return new AppError('OPERATION_FAILED', message);
 }
