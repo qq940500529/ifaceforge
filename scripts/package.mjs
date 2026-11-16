@@ -31,8 +31,9 @@ try {
     mode: 0o755,
   });
   const archive = join(out, 'ifaceforge-' + packageJson.version + '.tar.gz');
-  execFileSync('tar', ['-czf', archive, '-C', stage, 'ifaceforge'], { stdio: 'inherit' });
-  const sha = createHash('sha256').update(readFileSync(archive)).digest('hex');
+  const contents = execFileSync('tar', ['-czf', '-', 'ifaceforge'], { cwd: stage, maxBuffer: 128 * 1024 * 1024 });
+  writeFileSync(archive, contents);
+  const sha = createHash('sha256').update(contents).digest('hex');
   writeFileSync(join(out, 'SHA256SUMS.txt'), sha + '  ' + basename(archive) + '\n');
   console.log(archive);
 } finally {

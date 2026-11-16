@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,7 +12,12 @@ try {
   const root = join(stage, '验收 Git project');
   const install = join(root, '.devtools', 'ifaceforge', 'app');
   mkdirSync(install, { recursive: true });
-  execFileSync('tar', ['-xzf', archive, '-C', install], { stdio: 'inherit' });
+  // Windows tar can narrow Unicode arguments to the runner's active code page.
+  execFileSync('tar', ['-xzf', '-'], {
+    cwd: install,
+    input: readFileSync(archive),
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
   const cli = join(install, 'ifaceforge', 'dist', 'cli', 'main.js');
   git(['init', root]);
   const run = (...args) =>
