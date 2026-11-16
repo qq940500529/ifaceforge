@@ -14,7 +14,7 @@ import {
 import enUS from 'antd/es/locale/en_US.js';
 import zhCN from 'antd/es/locale/zh_CN.js';
 import type { Locale as AntLocale } from 'antd/es/locale/index.js';
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { scopedCommand, unwrap, type command } from './client.js';
 import { translator, type Language } from './i18n.js';
 import { ErrorView } from './components.js';
@@ -231,6 +231,8 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
   const [tasks, setTasks] = useState<TaskList>({ scans: [], runs: [] });
   const [error, setError] = useState<unknown>();
   const [pending, setPending] = useState(false);
+  const change = useRef(0);
+  const changing = useRef(false);
   const [management, setManagement] = useState(false);
   const [settings, setSettings] = useState(false);
   const [taskCenter, setTaskCenter] = useState(false);
@@ -244,22 +246,34 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
   const projects = workspace?.projects ?? [];
   const selected = projects.find((item) => item.id === workspace?.selected);
   const available = projects.filter((item) => item.available);
-  const activeTasks = tasks.scans.filter(running).length + tasks.runs.length;
+  const activeTasks =
+    tasks.scans.filter(running).length +
+    (tasks.versions ?? []).filter((item) => item.state === 'running' || item.state === 'cancelling').length +
+    tasks.runs.length;
   const taskProjectName = (id: string) => projectName(projects.find((item) => item.id === id)?.root ?? id);
 
+  function accept(data: WorkspaceState) {
+    setWorkspace((previous) => (JSON.stringify(previous) === JSON.stringify(data) ? previous : data));
+    if (data.selected)
+      setVisited((previous) => (previous.includes(data.selected!) ? previous : [...previous, data.selected!]));
+  }
+
   async function update(result: Promise<Result<WorkspaceState>>) {
+    const started = ++change.current;
+    changing.current = true;
     setError(undefined);
     setPending(true);
     try {
       const data = await unwrap(result);
-      setWorkspace(data);
-      if (data.selected)
-        setVisited((previous) => (previous.includes(data.selected!) ? previous : [...previous, data.selected!]));
+      if (started === change.current) accept(data);
     } catch (err) {
       setError(err);
       void message.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setPending(false);
+      if (started === change.current) {
+        changing.current = false;
+        setPending(false);
+      }
     }
   }
   async function choose(relocate?: string) {
@@ -278,13 +292,18 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
   useEffect(() => {
     void update(bridge.state());
     let inFlight = false;
+    let lastState = 0;
     let mounted = true;
     const timer = setInterval(() => {
       if (inFlight) return;
       inFlight = true;
-      void unwrap(bridge.tasks())
-        .then((next) => {
+      const started = change.current;
+      const readWorkspace = !changing.current && Date.now() - lastState > 1800;
+      if (readWorkspace) lastState = Date.now();
+      void Promise.all([unwrap(bridge.tasks()), readWorkspace ? unwrap(bridge.state()) : undefined])
+        .then(([next, state]) => {
           if (mounted) setTasks(next);
+          if (mounted && state && started === change.current && !changing.current) accept(state);
         })
         .catch(() => undefined)
         .finally(() => {
@@ -535,7 +554,49 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
       </Modal>
       <Modal open={taskCenter} title={msg('Tasks', '任务')} footer={null} onCancel={() => setTaskCenter(false)}>
         <div className="project-list">
-          {!tasks.scans.length && !tasks.runs.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+          {!tasks.scans.length && !tasks.versions?.length && !tasks.runs.length && (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+          {tasks.versions?.map((task) => (
+            <div className="managed-project" key={task.id}>
+              <Space wrap>
+                <strong>{taskProjectName(task.project)}</strong>
+                <Tag>
+                  {task.operation === 'compare'
+                    ? msg('Version comparison', '版本比较')
+                    : msg('Version scan', '版本扫描')}
+                </Tag>
+                <span>
+                  {task.state === 'complete'
+                    ? msg('Complete', '完成')
+                    : task.state === 'failed'
+                      ? msg('Failed', '失败')
+                      : task.state === 'cancelled'
+                        ? msg('Cancelled', '已取消')
+                        : msg('Running', '运行中')}
+                </span>
+              </Space>
+              <Space wrap>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setTaskCenter(false);
+                    void selectProject(task.project);
+                  }}
+                >
+                  {msg('Open project', '打开项目')}
+                </Button>
+                {task.state === 'running' && (
+                  <Button
+                    size="small"
+                    onClick={() => void scopedCommand(task.project)('git cancel', { id: task.id }).catch(setError)}
+                  >
+                    {t('cancel')}
+                  </Button>
+                )}
+              </Space>
+            </div>
+          ))}
           {tasks.scans.map((scan) => (
             <div className="managed-project" key={scan.id}>
               <Space wrap>

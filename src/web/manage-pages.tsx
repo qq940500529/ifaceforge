@@ -4,6 +4,7 @@ import type { Run, Case, Suite, Versioned } from '../app/runs.js';
 import type { Settings } from '../app/config.js';
 import type { Snapshot } from '../scanner/model.js';
 import type { Profile } from '../protocols/variables.js';
+import { mcpVersions } from '../protocols/mcp-versions.js';
 import { download, unwrap, WebError } from './client.js';
 import {
   Code,
@@ -783,15 +784,16 @@ function ProfileFields({
               options={[
                 { value: 'stdio', label: 'stdio' },
                 { value: 'streamableHttp', label: 'Streamable HTTP' },
+                { value: 'sse', label: 'HTTP + SSE' },
               ]}
               allowClear
               virtual={false}
-              onChange={(transport: 'stdio' | 'streamableHttp' | undefined) =>
+              onChange={(transport: 'stdio' | 'streamableHttp' | 'sse' | undefined) =>
                 update({
                   mcp:
                     transport === 'stdio'
                       ? { transport, command: '' }
-                      : transport === 'streamableHttp'
+                      : transport
                         ? { transport, url: '' }
                         : undefined,
                 })
@@ -806,7 +808,21 @@ function ProfileFields({
               />
             </Field>
           )}
-          {mcp?.transport === 'streamableHttp' && (
+          {mcp && (
+            <Field label={label('MCP protocol revision', 'MCP 协议版本')}>
+              <Select
+                aria-label={label('MCP protocol revision', 'MCP 协议版本')}
+                placeholder={label('Automatic', '自动协商')}
+                allowClear
+                value={mcp.protocolVersion}
+                options={mcpVersions
+                  .filter((version) => mcp.transport !== 'sse' || version !== '2026-07-28')
+                  .map((version) => ({ value: version, label: version }))}
+                onChange={(protocolVersion) => update({ mcp: { ...mcp, protocolVersion } })}
+              />
+            </Field>
+          )}
+          {mcp && mcp.transport !== 'stdio' && (
             <Field label={label('MCP URL', 'MCP 地址')}>
               <Input value={mcp.url} onChange={(event) => update({ mcp: { ...mcp, url: event.target.value } })} />
             </Field>

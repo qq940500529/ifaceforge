@@ -1,6 +1,8 @@
 const en = {
   brand: 'IfaceForge',
   catalog: 'Catalog',
+  versions: 'Versions',
+  guides: 'Developer guide',
   api: 'HTTP API',
   mcp: 'MCP',
   skill: 'Skills',
@@ -170,6 +172,8 @@ export type Key = keyof typeof en;
 const zh: Record<Key, string> = {
   brand: '接口工坊',
   catalog: '目录',
+  versions: '版本与对比',
+  guides: '开发指南',
   api: 'HTTP API',
   mcp: 'MCP',
   skill: '技能',

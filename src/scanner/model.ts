@@ -14,6 +14,7 @@ export interface Observation {
 }
 export interface Diagnostic {
   path?: string;
+  line?: number;
   code: string;
   message: string;
 }
@@ -31,6 +32,7 @@ export interface Snapshot {
   id: string;
   created: string;
   commit: string | null;
+  source?: 'git' | 'worktree';
   worktree: string;
   scope: string;
   complete: boolean;

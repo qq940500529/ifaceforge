@@ -14,7 +14,7 @@ import type { ProjectPaths } from './project.js';
 import type { Repository } from '../storage/repository.js';
 import type { Locale } from './config.js';
 import type { Snapshot } from '../scanner/model.js';
-import { activeSnapshot } from './catalog.js';
+import { activeSnapshot, getSnapshot } from './catalog.js';
 import { AppError, invalid } from './errors.js';
 import { digest, parseJson, projectFile } from './files.js';
 import { Bindings } from '../protocols/variables.js';
@@ -102,7 +102,7 @@ function snapshotFor(repository: Repository, id?: string) {
   if (!id && repository.list<Snapshot>('scans')[0]?.complete === false) {
     throw new AppError('INCOMPLETE_SCAN', 'Select a complete snapshot explicitly');
   }
-  const snapshot = id ? repository.require<Snapshot>('scans', id) : activeSnapshot(repository);
+  const snapshot = id ? getSnapshot(repository, id) : activeSnapshot(repository);
   if (!snapshot?.complete) throw new AppError('NO_SNAPSHOT', 'A complete scan is required');
   return snapshot;
 }

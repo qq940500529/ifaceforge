@@ -1,5 +1,6 @@
 import { Ajv } from 'ajv';
 import { invalid } from '../app/errors.js';
+import { mcpVersions } from '../protocols/mcp-versions.js';
 
 const text = { type: 'string', minLength: 1 };
 const id = { ...text, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$' };
@@ -127,11 +128,26 @@ export const schemas: Record<string, object> = {
       }),
       mcp: {
         oneOf: [
-          object({ transport: { const: 'stdio' }, command: text, args: array(text), cwd: text, env: map(env) }, [
-            'transport',
-            'command',
-          ]),
-          object({ transport: { const: 'streamableHttp' }, url: text, headers }, ['transport', 'url']),
+          object(
+            {
+              transport: { const: 'stdio' },
+              command: text,
+              args: array(text),
+              cwd: text,
+              env: map(env),
+              protocolVersion: { enum: mcpVersions },
+            },
+            ['transport', 'command'],
+          ),
+          object(
+            {
+              transport: { enum: ['streamableHttp', 'sse'] },
+              url: text,
+              headers,
+              protocolVersion: { enum: mcpVersions },
+            },
+            ['transport', 'url'],
+          ),
         ],
       },
     },

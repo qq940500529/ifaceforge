@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "api": {
+    "families": [
+      "Swagger 1.0",
+      "Swagger 1.1",
+      "Swagger 1.2",
+      "Swagger 2.0",
+      "OpenAPI 3.0.x",
+      "OpenAPI 3.1.x",
+      "OpenAPI 3.2.x"
+    ],
+    "scan": "structured-contracts",
+    "comparison": "normalized and original definitions",
+    "runtime": "HTTP requests and applicable JSON response schemas",
+    "languages": [
+      "any with a contract",
+      "Express source evidence",
+      "FastAPI source evidence"
+    ]
+  },
+  "mcp": {
+    "revisions": [
+      "2024-11-05",
+      "2025-03-26",
+      "2025-06-18",
+      "2025-11-25",
+      "2026-07-28"
+    ],
+    "transports": [
+      "stdio",
+      "HTTP + SSE for legacy servers",
+      "Streamable HTTP"
+    ],
+    "scan": [
+      "portable manifest",
+      "supported JavaScript and TypeScript SDK registrations"
+    ],
+    "comparison": "committed definitions; runtime discovery is environment-specific",
+    "operations": [
+      "tools",
+      "resources",
+      "resourceTemplates",
+      "prompts"
+    ]
+  },
+  "skills": {
+    "format": "Agent Skills SKILL.md",
+    "versions": [
+      "Git commit",
+      "optional metadata.version"
+    ],
+    "scan": [
+      "metadata",
+      "instructions",
+      "relative references"
+    ],
+    "comparison": "committed documents and reference paths"
+  }
+}

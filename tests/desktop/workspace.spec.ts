@@ -1,5 +1,6 @@
 import { _electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { git } from '../../src/app/project.js';
 import { basename, join } from 'node:path';
@@ -29,6 +30,28 @@ async function boot(data: string) {
     cwd: repositoryRoot,
     env: { ...process.env, IFG_DATA_HOME: data },
   });
+}
+
+async function closeDesktop(app: ElectronApplication) {
+  const process = app.process();
+  if (process.exitCode !== null || process.signalCode !== null) return;
+  const stopped = once(process, 'exit');
+  await app.evaluate(({ app }) => {
+    setTimeout(() => app.quit(), 35);
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const fallback = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        process.kill();
+        reject(new Error('Electron did not exit after quit'));
+      }, 10000);
+    });
+    const [code] = await Promise.race([stopped, fallback]);
+    expect(code).toBe(0);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 test('launches the desktop, switches projects and scans with a page popup', async ({}, info) => {
@@ -164,7 +187,7 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
     expect(errors).toEqual([]);
     expect(existsSync(join(first.root, '.devtools'))).toBe(false);
   } finally {
-    await app.close();
+    await closeDesktop(app);
     first.destroy();
     second.destroy();
   }
@@ -470,7 +493,7 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     expect(existsSync(join(sample.root, 'openapi.yml'))).toBe(true);
     expect((await ifg(sample.root, 'project', 'list')).result.data).toEqual([]);
   } finally {
-    await app.close();
+    await closeDesktop(app);
     await close(mcp);
     await close(service);
     sample.destroy();
@@ -515,6 +538,20 @@ test('keeps live MCP targets, drafts and results within their project', async ({
       await expect(visible.locator('pre.code:visible').filter({ hasText: value }).first()).toBeVisible();
     }
     await addAndTest(first.root, 'first project input');
+    const session = (await ifg(first.root, 'mcp', 'status')).result.data[0];
+    expect(session.profile).toBe('same');
+    const fromCli = await ifg(
+      first.root,
+      'mcp',
+      'call',
+      'echo',
+      '--connection',
+      session.id,
+      '--args',
+      '{"value":"from CLI"}',
+    );
+    expect(fromCli.exit).toBe(0);
+    expect(JSON.stringify(fromCli.result.data)).toContain('from CLI');
     await addAndTest(second.root, 'second project input');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(600, 680));
     const filters = visible.getByRole('group', { name: 'MCP capability types' });
@@ -535,9 +572,226 @@ test('keeps live MCP targets, drafts and results within their project', async ({
     ).toBeVisible();
     await expect(visible.locator('pre.code:visible').filter({ hasText: 'second project input' })).toHaveCount(0);
   } finally {
-    await app.close();
+    await closeDesktop(app);
     await close(server);
     first.destroy();
     second.destroy();
+  }
+});
+
+test('browses and compares selected versions with responsive graph controls', async ({}, info) => {
+  test.setTimeout(120_000);
+  const sample = fixture('express');
+  const commit = (title: string, body: string) =>
+    git(sample.root, [
+      '-c',
+      'user.name=IfaceForge Tests',
+      '-c',
+      'user.email=tests@example.test',
+      'commit',
+      '--allow-empty',
+      '-qm',
+      title,
+      '-m',
+      body,
+    ]);
+  commit('Initial API definitions', 'Original contract and helper modules.');
+  const common = git(sample.root, ['rev-parse', 'HEAD']).trim();
+  for (let index = 0; index < 52; index++) git(sample.root, ['branch', 'team/topic-' + index]);
+  git(sample.root, ['switch', '-qc', 'baseline']);
+  commit('Keep the stable interface line', 'The baseline retains the original capabilities.');
+  git(sample.root, ['switch', '-qc', 'feature-interfaces', common]);
+  for (let index = 1; index <= 24; index++)
+    commit('Maintenance ' + index, 'Repository history for visual review.');
+  sample.write('openapi.versioned.json', {
+    openapi: '3.2.0',
+    info: { title: 'Version checks', version: '2' },
+    paths: {
+      '/version-check': {
+        get: { summary: 'Check the selected Git version', responses: { 200: { description: 'Ready' } } },
+      },
+    },
+  });
+  sample.write('mcp-capabilities.json', {
+    schemaVersion: 1,
+    service: 'version-check',
+    tools: [{ name: 'inspect-version' }],
+  });
+  writeFileSync(
+    join(sample.root, 'skills', 'read-tasks', 'SKILL.md'),
+    '---\nname: read-tasks\ndescription: Read tasks by Git version\n---\n\nReview the version-specific task.\n',
+  );
+  git(sample.root, ['add', '.']);
+  commit(
+    'Add versioned interfaces',
+    'The contract, tool and skill are available on this branch.\n\nThe full message explains the new definitions.',
+  );
+  const feature = git(sample.root, ['rev-parse', 'HEAD']).trim();
+  git(sample.root, ['tag', 'interfaces-v2']);
+  const before = git(sample.root, ['status', '--porcelain=v1']);
+
+  const app = await boot(sample.data);
+  try {
+    const page = await app.firstWindow();
+    page.setDefaultTimeout(10000);
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    const button = (name: string) => page.getByRole('button', { name, exact: true });
+    const field = (name: string) => page.getByRole('combobox', { name, exact: true });
+    const option = async (name: string, label: RegExp) => {
+      await field(name).click();
+      await field(name).fill(label.source.replace(/^\^/, ''));
+      await page
+        .locator('.ant-select-dropdown:visible .ant-select-item-option')
+        .filter({ hasText: label })
+        .first()
+        .click();
+    };
+    const evidence = (name: string) =>
+      page.screenshot({
+        path: info.outputPath(name + '.png'),
+        style: '.project-path { visibility: hidden !important }',
+        scale: 'css',
+      });
+    await choose(app, sample.root);
+    await page.locator('.desktop-header').getByRole('button', { name: 'Add project', exact: true }).click();
+    await button('Refresh refs').click();
+    await button('Versions and comparison').click();
+    await expect(page.getByRole('heading', { name: 'Versions', exact: true })).toBeVisible();
+    const first = page.locator('[data-commit="' + feature + '"]');
+    await expect(first).toBeVisible();
+    await expect(page.locator('.git-row')).toHaveCount(24);
+    await expect(first.getByText('interfaces-v2')).toBeVisible();
+    await first.locator('time').hover();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(tooltip).toHaveCount(0);
+    await page.getByText('Git network', { exact: true }).hover();
+    await first.hover({ position: { x: 25, y: 24 } });
+    await expect(tooltip).toBeVisible();
+    const mouseAt = await first.boundingBox();
+    const tipAt = await tooltip.boundingBox();
+    await page.mouse.move(mouseAt!.x + 67, mouseAt!.y + 29);
+    await expect.poll(async () => (await tooltip.boundingBox())?.x).not.toBe(tipAt?.x);
+    expect(
+      await tooltip.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return box.x >= 0 && box.y >= 0 && box.right <= innerWidth && box.bottom <= innerHeight;
+      }),
+    ).toBe(true);
+    await evidence('versions-row-tooltip');
+    await first.click();
+    await expect(page.getByText('Commit time', { exact: true })).toBeVisible();
+    await page.getByText('Show full message', { exact: true }).click();
+    await expect(
+      page.getByText('The full message explains the new definitions.', { exact: false }).last(),
+    ).toBeVisible();
+    await page.getByText('Show full message', { exact: true }).click();
+
+    await page.getByText(/^All refs/).click();
+    await button('Show more refs').click();
+    await page.getByRole('textbox', { name: 'Find a branch' }).fill('topic-51');
+    await button('team/topic-51').click();
+    await expect(page.locator('.git-details').getByText('Initial API definitions')).toBeVisible();
+    await page.getByText(/^All refs/).click();
+    await option('Branches in graph', /^baseline/);
+    await page.keyboard.press('Escape');
+    await button('Show more').click();
+    await expect(page.locator('.git-row')).toHaveCount(27);
+    const find = page.getByRole('searchbox', { name: 'Find commit' });
+    await find.fill('Maintenance 1');
+    await find.press('Enter');
+    await expect(page.locator('.git-details').getByText(/Maintenance 1/)).toBeVisible();
+
+    await option('Base', /^baseline/);
+    await option('Target', /^feature-interfaces/);
+    await button('Swap').click();
+    await button('Swap').click();
+    await button('Compare').click();
+    await expect(button('HTTP API 1')).toBeVisible();
+    await expect(button('MCP 1')).toBeVisible();
+    await expect(button('Skills 1')).toBeVisible();
+    await button('HTTP API 1').click();
+    await field('Comparison basis').click();
+    await page
+      .locator('.ant-select-dropdown:visible .ant-select-item-option')
+      .filter({ hasText: 'Common ancestor' })
+      .click();
+    await button('Apply basis').click();
+    await expect(button('HTTP API 1')).toBeVisible();
+    await page.getByText('GET /version-check', { exact: true }).click();
+    await expect(button('Target source')).toBeVisible();
+    await button('Target source').click();
+    const modal = page.getByRole('dialog', { name: 'openapi.versioned.json' });
+    await expect(modal.getByText(/Check the selected Git version/)).toBeVisible();
+    await modal.getByRole('button', { name: 'Close' }).click();
+    await button('Unified view').click();
+    await expect(button('Side by side')).toBeVisible();
+    await button('Side by side').click();
+    await page.getByRole('textbox', { name: 'Filter changes' }).fill('missing');
+    await expect(page.getByText('No changes', { exact: true })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Filter changes' }).clear();
+    await button('MCP 1').click();
+    await expect(page.getByText('inspect-version', { exact: true })).toBeVisible();
+    await button('Skills 1').click();
+    await expect(page.getByText('read-tasks', { exact: true })).toBeVisible();
+    await button('Files 3').click();
+    await option('Changed file', /openapi.versioned.json/);
+    await expect(page.locator('.git-layout pre.code').filter({ hasText: 'version-check' })).toBeVisible();
+    await page.getByRole('button', { name: /^Diagnostics \d+$/ }).click();
+    await button('All capabilities 3').click();
+    await page.locator('.page-title').scrollIntoViewIfNeeded();
+    await app.evaluate(
+      ({ dialog }, filePath) => {
+        dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+      },
+      join(sample.data, 'comparison.json'),
+    );
+    await button('Export JSON').click();
+    await expect.poll(() => existsSync(join(sample.data, 'comparison.json'))).toBe(true);
+    expect(JSON.parse(readFileSync(join(sample.data, 'comparison.json'), 'utf8')).target.sha).toBe(feature);
+    await evidence('versions-desktop');
+
+    await option('Browse version', /^feature-interfaces/);
+    await expect(page.locator('.version-browse').getByText(feature.slice(0, 8), { exact: true })).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Catalog', exact: true }).click();
+    await expect(page.getByRole('button', { name: /GET \/version-check/ })).toBeVisible();
+    await expect(button('Compare')).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Developer guide', exact: true }).click();
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Compatibility matrix$/ })
+      .click();
+    await expect(page.locator('pre.code').filter({ hasText: 'Swagger 1.0' })).toBeVisible();
+    await button('Check scan diagnostics').click();
+    await expect(page.getByText(/^(?:No|\d+) scan diagnostics$/)).toBeVisible();
+    await button('Export guide JSON').click();
+    const fromCli = await ifg(sample.root, 'scan', 'start');
+    expect(fromCli.exit).toBe(0);
+    expect((await ifg(sample.root, 'task', 'watch', fromCli.result.data.id)).result.data.state).toBe('complete');
+    await page
+      .locator('.desktop-header')
+      .getByRole('button', { name: /^Tasks/ })
+      .click();
+    const taskCenter = page.getByRole('dialog', { name: 'Tasks' });
+    await expect(taskCenter.getByRole('button', { name: 'Scan status' })).toBeVisible();
+    await taskCenter.getByRole('button', { name: 'Close' }).click();
+    await button('Versions and comparison').click();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(600, 750));
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBeLessThan(640);
+    await first.scrollIntoViewIfNeeded();
+    await first.hover({ position: { x: 25, y: 23 } });
+    await expect(tooltip).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await evidence('versions-narrow');
+    expect(git(sample.root, ['status', '--porcelain=v1'])).toBe(before);
+    expect(errors).toEqual([]);
+  } catch (error) {
+    process.stderr.write(String(error) + '\n');
+    throw error;
+  } finally {
+    await closeDesktop(app);
+    sample.destroy();
   }
 });

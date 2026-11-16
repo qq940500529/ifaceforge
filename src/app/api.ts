@@ -171,6 +171,8 @@ export function apiFragment(entity: Entity, format = 'json') {
 
 export function requestDraft(entity: Entity): HttpRequest {
   const selected = definition(entity) ?? entity.observations[0].definition;
+  if (typeof selected.method !== 'string' || typeof selected.path !== 'string')
+    throw new AppError('NO_DEFINITION', 'No supported HTTP operation is available');
   const operation = mapping(selected.operation);
   const parameters = Array.isArray(operation.parameters) ? operation.parameters.map(mapping) : [];
   const inputs: Record<string, unknown> = {};

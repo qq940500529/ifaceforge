@@ -211,6 +211,22 @@ export class RunExecutor {
     return { id, connected: false };
   }
 
+  connectionInfo() {
+    return [...this.connections].map(([id, connection]) =>
+      connection.bindings.redact({
+        id,
+        profile: connection.profile,
+        ...connection.session.info(),
+      }),
+    );
+  }
+
+  connectionProfile(id: string) {
+    const connection = this.connections.get(id);
+    if (!connection) throw new AppError('MCP_DISCONNECTED', 'MCP session is no longer available');
+    return connection.profile;
+  }
+
   async close() {
     const running = [...this.running.values()];
     for (const entry of running) entry.controller.abort(new AppError('CANCELED', 'Workbench is shutting down', 4));

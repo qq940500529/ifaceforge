@@ -24,7 +24,7 @@ export interface Context {
   refresh: () => void;
   setLocale: (locale: Language) => Promise<void>;
   notify: (text: string) => void;
-  showSource: (path: string, line?: number) => void;
+  showSource: (path: string, line?: number, ref?: string) => void;
 }
 export const Workspace = createContext<Context>(null!);
 export const useWorkspace = () => useContext(Workspace);

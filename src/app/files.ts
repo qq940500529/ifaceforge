@@ -73,7 +73,20 @@ export function digest(value: string | Buffer): string {
 }
 
 export function sourceText(root: string, path: string) {
-  const content = readFileSync(projectFile(root, path));
+  return decodeSource(readFileSync(projectFile(root, path)));
+}
+
+export function decodeSource(content: Buffer) {
   if (content.length > 8 * 1024 * 1024 || content.includes(0)) invalid('Expected a UTF-8 source file up to 8 MiB');
   return new TextDecoder('utf-8', { fatal: true }).decode(content);
+}
+
+export const protectedSource =
+  /(^|[\\/])(?:\.git|\.devtools|\.ipc-token|\.env(?:\.[^\\/]*)?)([\\/]|$)|\.(?:pem|key|pfx|p12)$/i;
+
+export interface ScanSource {
+  readonly commit: string;
+  readonly paths: Iterable<string>;
+  has(path: string): boolean;
+  read(path: string): string;
 }

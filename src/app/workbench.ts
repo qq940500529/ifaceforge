@@ -1,9 +1,12 @@
 import { AppError, invalid } from './errors.js';
 import { safeProfile } from './profiles.js';
 import { apiFragment, importApi, requestDraft, type Assertion } from './api.js';
-import { activeSnapshot, diffScans, getEntity, page, scanProject, searchCatalog } from './catalog.js';
+import { activeSnapshot, diffScans, getEntity, getSnapshot, page, scanProject, searchCatalog } from './catalog.js';
 import { checkConfig, effectiveConfig, type Locale } from './config.js';
-import { sourceText, projectFile } from './files.js';
+import { sourceText, projectFile, protectedSource } from './files.js';
+import { commitSource, filePatch, gitCommit, gitLog, gitRefs, gitRelation, resolveCommit } from './git-history.js';
+import { browseVersion, compareVersions, type BrowseVersion, type VersionSelection } from './version-compare.js';
+import { guide, guideDiagnostics } from './guides.js';
 import { backupData, pruneData, restoreData } from './maintenance.js';
 import { git, type ProjectPaths } from './project.js';
 import {
@@ -35,6 +38,13 @@ export interface CommandInput {
   page?: string;
   from?: string;
   to?: string;
+  base?: string;
+  target?: string;
+  ref?: string;
+  refs?: string[];
+  mode?: VersionSelection['mode'];
+  ancestor?: string;
+  previous?: string;
   profile?: string;
   connection?: string;
   service?: string;
@@ -80,13 +90,17 @@ export class Workbench {
     const pagination = <T>(items: T[]) => page(items, input.limit, input.offset);
     const id = () => need(input.id, 'record ID');
     const profile = () => executor.profile(input.profile);
+    const historical = async () =>
+      input.snapshot ?? (input.ref ? (await browseVersion(project, repository, input.ref)).snapshot : undefined);
     const wiki = () => ({
       snapshot: input.snapshot,
       out: input.out,
       locale: input.lang ?? effectiveConfig(project, repository).settings.locale,
     });
     const batch = async (actions: Parameters<RunExecutor['mcp']>[0]) => {
-      const run = executor.mcp(actions, need(input.profile, 'profile'), input.service, input.connection);
+      const selected =
+        input.profile ?? (input.connection ? executor.connectionProfile(input.connection) : undefined);
+      const run = executor.mcp(actions, need(selected, 'profile'), input.service, input.connection);
       return wait ? run.finished : run.run;
     };
     switch (command) {
@@ -108,6 +122,64 @@ export class Workbench {
         const locale =
           repository.setting<{ locale?: Locale }>('config')?.locale ?? repository.setting<Locale>('locale');
         return { root: project.root, data: project.data, branch, snapshot: snapshot?.id, locale };
+      }
+      case 'git branches':
+        return pagination(await gitRefs(project.root, input.query));
+      case 'guide show':
+        return guide(input.lang);
+      case 'guide validate': {
+        const snapshot = await historical();
+        return guideDiagnostics(snapshot ? getSnapshot(repository, snapshot) : scanProject(project, repository));
+      }
+      case 'git log':
+        return gitLog(
+          project.root,
+          input.refs ?? (input.ref ? [input.ref] : []),
+          input.offset,
+          input.limit,
+          input.query,
+        );
+      case 'git commit':
+        return gitCommit(project.root, need(input.ref ?? input.id, 'revision'));
+      case 'git relation': {
+        const [base, target] = await Promise.all([
+          resolveCommit(project.root, input.base),
+          resolveCommit(project.root, input.target),
+        ]);
+        return gitRelation(project.root, base, target);
+      }
+      case 'git view':
+        return repository.setting<BrowseVersion>('gitView') ?? null;
+      case 'git browse': {
+        const view = input.ref ? await browseVersion(project, repository, input.ref, { full: input.full }) : null;
+        repository.set('gitView', view);
+        return view;
+      }
+      case 'git preference': {
+        const selection = { base: input.base, target: input.target, mode: input.mode, ancestor: input.ancestor };
+        if (Object.values(selection).some((value) => value !== undefined)) {
+          if (input.mode !== 'branches' && input.mode !== 'commits') invalid('Unknown comparison mode');
+          if (
+            Object.values(selection).some(
+              (value) => value !== undefined && (typeof value !== 'string' || value.length > 1024),
+            )
+          )
+            invalid('Invalid comparison preference');
+          repository.set('gitSelection', selection);
+        }
+        return repository.setting<VersionSelection>('gitSelection') ?? null;
+      }
+      case 'compare':
+        return compareVersions(project, repository, {
+          ...input,
+          ancestor: input.ancestor === 'auto' ? '' : input.ancestor,
+        });
+      case 'compare file': {
+        const [base, target] = await Promise.all([
+          resolveCommit(project.root, input.base),
+          resolveCommit(project.root, input.target),
+        ]);
+        return filePatch(project.root, base, target, need(input.path, 'path'), input.previous);
       }
       case 'config show':
         return effectiveConfig(project, repository);
@@ -149,35 +221,47 @@ export class Workbench {
             .map(({ entities, ...summary }) => ({ ...summary, count: entities.length })),
         );
       case 'scan show':
-        return repository.require('scans', id());
+        return getSnapshot(repository, id());
       case 'scan diff':
         return diffScans(
-          repository.require('scans', need(input.from, 'from')),
-          repository.require('scans', need(input.to, 'to')),
+          getSnapshot(repository, need(input.from, 'from')),
+          getSnapshot(repository, need(input.to, 'to')),
         );
       case 'catalog list':
       case 'catalog search':
-        return searchCatalog(repository, input);
+        return searchCatalog(repository, { ...input, snapshot: await historical() });
       case 'skill list':
       case 'skill search':
-        return searchCatalog(repository, { ...input, kind: 'skill' });
+        return searchCatalog(repository, { ...input, kind: 'skill', snapshot: await historical() });
       case 'catalog show':
       case 'skill show': {
-        const entity = getEntity(repository, id());
+        const entity = getEntity(repository, id(), await historical());
         if (command === 'skill show' && entity.kind !== 'skill') invalid('Expected a skill ID');
         return entity;
       }
       case 'source show': {
         const path = need(input.path, 'path');
-        if (/(^|[\\/])(?:\.git|\.devtools|\.env(?:\.[^\\/]*)?)([\\/]|$)|\.(?:pem|key|pfx|p12)$/i.test(path)) {
+        if (protectedSource.test(path)) {
           invalid('Workspaces and credential files are outside the source viewer');
         }
-        return { path, text: sourceText(project.root, path) };
+        const snapshot = input.snapshot ? getSnapshot(repository, input.snapshot) : undefined;
+        const revision = input.ref
+          ? await resolveCommit(project.root, input.ref)
+          : snapshot?.source === 'git'
+            ? snapshot.commit
+            : null;
+        return {
+          path,
+          text: revision ? commitSource(project.root, revision, path).read(path) : sourceText(project.root, path),
+        };
       }
       case 'api import':
         return importApi(project, repository, { ...input, profile: profile() });
-      case 'api draft':
-        return requestDraft(getEntity(repository, id()));
+      case 'api draft': {
+        const snapshot = await historical();
+        const draft = requestDraft(getEntity(repository, id(), snapshot));
+        return snapshot ? { ...draft, operationId: undefined } : draft;
+      }
       case 'api preview': {
         const template = validate<HttpRequest>('request', input.body);
         const selected = profile();
@@ -194,9 +278,11 @@ export class Workbench {
       case 'api curl':
         return { curl: curl(validate<HttpRequest>('request', input.body), profile()) };
       case 'api export':
-        return apiFragment(getEntity(repository, id()), input.format);
+        return apiFragment(getEntity(repository, id(), await historical()), input.format);
       case 'mcp connect':
         return executor.connect(need(input.profile, 'profile'));
+      case 'mcp status':
+        return executor.connectionInfo();
       case 'mcp disconnect':
         return executor.disconnect(id());
       case 'mcp discover':
