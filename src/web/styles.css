@@ -324,6 +324,29 @@ pre.code {
   padding: 8px 0;
   border-top: 1px solid #e4eaf3;
 }
+.request-pairs {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+.request-pairs details {
+  width: 100%;
+}
+.pair-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+.pair-fields > input {
+  flex: 1 1 100px;
+  min-width: 0;
+}
+.markdown pre {
+  max-height: 24rem;
+  overflow: auto;
+}
 #root:has(.desktop-header) {
   min-height: 100vh;
   display: flex;

@@ -87,14 +87,14 @@ export function TestPage() {
       setSaving(false);
     }
   }
-  let order: string[] = [];
-  if (tab === 'suite') {
-    try {
-      order = (parse(document) as Suite).caseIds ?? [];
-    } catch {
-      /* JSON editor displays validation on save. */
-    }
+  let draft: Case | Suite | undefined;
+  try {
+    const value = parse(document);
+    if (value && typeof value === 'object' && 'name' in value && 'id' in value) draft = value as Case | Suite;
+  } catch {
+    /* The raw editor remains usable while the document is incomplete. */
   }
+  const order = draft && 'caseIds' in draft ? draft.caseIds : [];
   function updateOrder(caseIds: string[]) {
     try {
       setDocument(json({ ...(parse(document) as Suite), caseIds }));
@@ -153,7 +153,23 @@ export function TestPage() {
             <Card size="small" title={selected?.document.name ?? t('edit')}>
               <div className="stack">
                 <ErrorView error={error} />
-                <JsonField label={t('document')} value={document} change={setDocument} rows={11} />
+                {draft && (
+                  <div className="toolbar">
+                    <Field label={t('caseId')}>
+                      <Input
+                        readOnly={!!selected}
+                        value={draft.id}
+                        onChange={(e) => setDocument(json({ ...draft, id: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label={t('name')}>
+                      <Input
+                        value={draft.name}
+                        onChange={(e) => setDocument(json({ ...draft, name: e.target.value }))}
+                      />
+                    </Field>
+                  </div>
+                )}
                 {tab === 'suite' && Array.isArray(order) && (
                   <div>
                     <Typography.Text strong>{t('caseOrder')}</Typography.Text>
@@ -185,6 +201,7 @@ export function TestPage() {
                       </div>
                     ))}
                     <Select<string | undefined>
+                      virtual={false}
                       aria-label={t('caseId')}
                       placeholder={t('selectItem')}
                       value={undefined}
@@ -198,6 +215,10 @@ export function TestPage() {
                     />
                   </div>
                 )}
+                <details open={draft ? undefined : true}>
+                  <summary>{t('document')}</summary>
+                  <JsonField label={t('document')} value={document} change={setDocument} rows={11} />
+                </details>
                 <Space wrap>
                   <Button type="primary" loading={saving} onClick={() => void save()}>
                     {t('save')}

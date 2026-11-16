@@ -4,6 +4,7 @@ import type { Assertion } from '../app/api.js';
 import type { Case } from '../app/runs.js';
 import type { HttpRequest } from '../protocols/http.js';
 import type { Discovery } from '../protocols/mcp.js';
+import type { Pair } from '../protocols/variables.js';
 import type { Entity } from '../scanner/model.js';
 import { copyText, download, unwrap } from './client.js';
 import { CatalogList, EntityDetail, useCatalog } from './catalog-page.js';
@@ -230,8 +231,8 @@ export function ApiPage() {
             </Space>
             {targetPreview?.draft === draftKey && <Code value={targetPreview.method + ' ' + targetPreview.url} />}
             <div className="split split-even">
-              <JsonField label={t('query')} value={query} change={setQuery} rows={3} />
-              <JsonField label={t('header')} value={headers} change={setHeaders} rows={3} />
+              <RequestPairs kind="query" value={query} change={setQuery} />
+              <RequestPairs kind="header" value={headers} change={setHeaders} />
               <JsonField label={t('inputs')} value={inputs} change={setInputs} rows={3} />
               <JsonField label={t('body')} value={body} change={setBody} rows={3} />
             </div>
@@ -328,6 +329,72 @@ export function ApiPage() {
           <ProfilePicker profiles={profiles.data?.items ?? []} value={profile} change={setProfile} />
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function RequestPairs({
+  kind,
+  value,
+  change,
+}: {
+  kind: 'query' | 'header';
+  value: string;
+  change: (next: string) => void;
+}) {
+  const { lang, t } = useWorkspace();
+  const zh = lang === 'zh-CN';
+  const label = kind === 'query' ? (zh ? '查询参数' : 'Query parameters') : zh ? '请求头' : 'Headers';
+  let pairs: Pair[] | undefined;
+  try {
+    const parsed = parse(value);
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((entry) => entry && typeof entry.name === 'string' && 'value' in entry)
+    ) {
+      pairs = parsed as Pair[];
+    }
+  } catch {
+    // The JSON editor stays available while someone is repairing a draft.
+  }
+  const update = (index: number, fields: Partial<Pair>) =>
+    change(json(pairs?.map((pair, at) => (at === index ? { ...pair, ...fields } : pair)) ?? []));
+  return (
+    <div className="request-pairs">
+      {pairs && (
+        <>
+          <Typography.Text strong>{label}</Typography.Text>
+          {pairs.map((pair, index) => (
+            <div className="pair-fields" key={index}>
+              <Input
+                aria-label={label + ' ' + t('name') + ' ' + (index + 1)}
+                placeholder={t('name')}
+                value={pair.name}
+                onChange={(event) => update(index, { name: event.target.value })}
+              />
+              <Input
+                aria-label={label + ' ' + (zh ? '值' : 'value') + ' ' + (index + 1)}
+                placeholder={zh ? '值' : 'Value'}
+                value={typeof pair.value === 'object' ? json(pair.value) : String(pair.value)}
+                onChange={(event) => update(index, { value: event.target.value })}
+              />
+              <Button
+                aria-label={t('remove') + ' ' + label + ' ' + (index + 1)}
+                onClick={() => change(json(pairs?.filter((_entry, at) => at !== index)))}
+              >
+                {t('remove')}
+              </Button>
+            </div>
+          ))}
+          <Button size="small" onClick={() => change(json([...pairs!, { name: '', value: '' }]))}>
+            {kind === 'query' ? (zh ? '添加参数' : 'Add parameter') : zh ? '添加请求头' : 'Add header'}
+          </Button>
+        </>
+      )}
+      <details open={pairs ? undefined : true}>
+        <summary>{t(kind)}</summary>
+        <JsonField label={t(kind)} value={value} change={change} rows={3} />
+      </details>
     </div>
   );
 }
@@ -488,7 +555,10 @@ export function McpPage() {
                 <ToolFields schema={selected.details.inputSchema} value={argument} change={setArgument} />
               )}
               {['tool', 'prompt'].includes(selected.type) ? (
-                <JsonField label={t('argument')} value={argument} change={setArgument} />
+                <details open={selected.type === 'prompt' ? true : undefined}>
+                  <summary>{t('argument')}</summary>
+                  <JsonField label={t('argument')} value={argument} change={setArgument} />
+                </details>
               ) : (
                 <Field label={t('uri')}>
                   <Input value={uri} onChange={(event) => setUri(event.target.value)} />

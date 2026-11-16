@@ -116,7 +116,9 @@ test('discovers an MCP tool and submits a schema field through the Web interface
     await page.getByRole('button', { name: 'echo', exact: true }).click();
     await page.getByRole('textbox', { name: 'value *', exact: true }).fill('from basic field');
     await page.getByRole('button', { name: 'Call tool', exact: true }).click();
-    await expect(page.getByText('"value": "from basic field"', { exact: false })).toBeVisible();
+    await expect(
+      page.locator('pre.code').filter({ hasText: '"value": "from basic field"' }).first(),
+    ).toBeVisible();
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
   } finally {

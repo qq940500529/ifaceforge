@@ -1,6 +1,6 @@
 import { _electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { git } from '../../src/app/project.js';
 import { basename, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -77,10 +77,8 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
     await header.getByRole('button', { name: 'Add project' }).click();
     await expect(page.locator('.project-path:visible')).toHaveText(first.root);
 
-    for (let i = 0; i < 220; i++) {
-      const path = join(firstDir, 'route-' + i + '.ts');
-      writeFileSync(path, '// test fixture\n'.repeat(600) + "app.get('/test-" + i + "', handler);\n");
-    }
+    // A large tracked source holds the real scanner open long enough on fast runners.
+    writeFileSync(join(firstDir, 'routes.js'), "app.get('/cancellable', handler);\n".repeat(180_000));
     git(first.root, ['add', '.']);
     await page.getByRole('button', { name: 'Scan project', exact: true }).click();
     await expect(page.locator('.scan-panel:visible')).toBeVisible();
@@ -110,19 +108,40 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
     const blocked = await page.evaluate(async () => window.ifaceforge!.command('invalid-id', 'stop', {}));
     expect(blocked.ok).toBe(false);
 
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(600, 680));
-    for (const tab of ['Catalog', 'HTTP API', 'MCP', 'Skills', 'Tests', 'Wiki', 'Local settings']) {
-      const navigation = page.locator('.mobile-nav:visible');
-      await navigation.click();
-      await page.getByRole('option', { name: tab, exact: true }).click();
-      await expect(page.getByRole('option', { name: tab, exact: true })).not.toBeVisible();
-      await expect(page.getByRole('heading', { name: tab, exact: true }).first()).toBeVisible();
-      await page.screenshot({
-        path: info.outputPath('narrow-' + tab.replaceAll(' ', '-') + '.png'),
-        style: '.project-path { visibility: hidden !important }',
-        scale: 'css',
-      });
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const tabs = ['Catalog', 'HTTP API', 'MCP', 'Skills', 'Tests', 'Wiki', 'Local settings'];
+    for (const width of [1440, 1200, 960, 820, 720, 640, 600]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(size, 680), width);
+      await expect
+        .poll(() => page.evaluate(() => Math.abs(innerWidth - document.documentElement.clientWidth)))
+        .toBeLessThan(30);
+      for (const tab of tabs) {
+        const navigation = page.locator('.mobile-nav:visible');
+        if (await navigation.isVisible()) {
+          await navigation.click();
+          await page.getByRole('option', { name: tab, exact: true }).click();
+          await expect(page.getByRole('option', { name: tab, exact: true })).not.toBeVisible();
+        } else {
+          await page.getByRole('menuitem', { name: tab, exact: true }).click();
+        }
+        await expect(page.getByRole('heading', { name: tab, exact: true }).first()).toBeVisible();
+        const layout = await page.evaluate(() => ({
+          viewport: innerWidth,
+          content: document.documentElement.scrollWidth,
+          buttons: [...document.querySelectorAll('.desktop-actions button')].every((el) => {
+            const bounds = el.getBoundingClientRect();
+            return bounds.left >= 0 && bounds.right <= innerWidth;
+          }),
+        }));
+        expect(layout.content, width + ' px ' + tab).toBeLessThanOrEqual(layout.viewport);
+        expect(layout.buttons, width + ' px ' + tab).toBe(true);
+        if (width === 600 || tab === 'HTTP API') {
+          await page.screenshot({
+            path: info.outputPath(width + '-' + tab.replaceAll(' ', '-') + '.png'),
+            style: '.project-path { visibility: hidden !important }',
+            scale: 'css',
+          });
+        }
+      }
     }
     await header.getByRole('button', { name: 'Preferences' }).click();
     const prefs = page.getByRole('dialog', { name: 'Preferences' });
@@ -158,6 +177,23 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     }),
   );
   expect(profile.exit).toBe(0);
+  const stdio = await ifg(
+    sample.root,
+    'profile',
+    'put',
+    '--file',
+    sample.write('stdio-profile.json', {
+      schemaVersion: 1,
+      id: 'stdio-demo',
+      name: 'Stdio environment',
+      mcp: {
+        transport: 'stdio',
+        command: process.execPath,
+        args: [join(repositoryRoot, 'fixtures', 'express', 'mcp.mjs'), 'stdio', 'modern'],
+      },
+    }),
+  );
+  expect(stdio.exit).toBe(0);
   const app = await boot(sample.data);
   try {
     const page = await app.firstWindow();
@@ -206,12 +242,34 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await page.getByRole('tab', { name: 'Markdown' }).click();
 
     await navigate('HTTP API');
+    await choose(app, join(sample.root, 'openapi.yml'));
+    await button('Import OpenAPI').click();
+    await button('Choose file').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Import', exact: true }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
     await button('New request').click();
-    await page.getByRole('textbox', { name: 'Target URL or profile path' }).fill(target + '?test=1');
+    await page.getByRole('textbox', { name: 'Target URL or profile path' }).fill(target);
+    await button('Add parameter').click();
+    await page.getByRole('textbox', { name: 'Query parameters Name 1' }).fill('test');
+    await page.getByRole('textbox', { name: 'Query parameters value 1' }).fill('1');
+    await button('Add header').click();
+    await page.getByRole('textbox', { name: 'Headers Name 1' }).fill('x-ifg-test');
+    await page.getByRole('textbox', { name: 'Headers value 1' }).fill('desktop');
     await button('Preview target').click();
     await expect(page.getByText('GET ' + target + '?test=1', { exact: true })).toBeVisible();
-    await page.getByRole('textbox', { name: 'Target URL or profile path' }).fill(target);
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Query pairs/ })
+      .click();
+    await expect(page.getByRole('textbox', { name: 'Query pairs (JSON)' })).toBeVisible();
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Query pairs/ })
+      .click();
+    await button('Remove Query parameters 1').click();
     await expect(page.getByText('GET ' + target + '?test=1', { exact: true })).not.toBeVisible();
+    await button('Copy cURL').click();
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toContain('x-ifg-test');
     await button('Send request').click();
     await expect(page.getByText('Sample task', { exact: false }).first()).toBeVisible();
     await button('Save as case').click();
@@ -236,15 +294,33 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await button('echo').click();
     await page.getByRole('textbox', { name: 'value *', exact: true }).fill('desktop tool result');
     await button('Call tool').click();
-    await expect(page.getByText('"value": "desktop tool result"', { exact: false })).toBeVisible();
+    await expect(
+      page.locator('pre.code').filter({ hasText: '"value": "desktop tool result"' }).first(),
+    ).toBeVisible();
     await snapshot('mcp-tool');
     await button('Disconnect').click();
     await expect(button('Connect')).toBeVisible();
+    await page.getByRole('combobox', { name: 'Profile', exact: true }).click();
+    await page.getByRole('option', { name: 'Stdio environment', exact: true }).click();
+    await button('Connect').click();
+    await button('Discover').click();
+    await page.getByRole('tab', { name: 'Resources', exact: true }).click();
+    await button('task').click();
+    await button('Read resource').click();
+    await expect(page.getByText('Sample task 42', { exact: false }).first()).toBeVisible();
+    await page.getByRole('tab', { name: 'Prompts', exact: true }).click();
+    await button('task-summary').click();
+    await page.getByRole('textbox', { name: 'Arguments (JSON)', exact: true }).fill('{"title":"desktop audit"}');
+    await button('Get prompt').click();
+    await expect(page.getByText('Summarize desktop audit', { exact: false }).first()).toBeVisible();
+    await button('Disconnect').click();
 
     await navigate('Wiki');
     await choose(app, exportPath);
     await button('Choose folder').click();
-    await button('Preview Wiki').click();
+    const previewWiki = page.locator('.main:visible .toolbar button').filter({ hasText: /^Preview Wiki$/ });
+    await expect(previewWiki).toBeVisible();
+    await previewWiki.click();
     await expect(page.getByRole('heading', { name: 'IfaceForge Wiki' })).toBeVisible();
     const changes = page.locator('summary').filter({ hasText: /Changed pages/ });
     await changes.click();
@@ -254,6 +330,13 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await button('Generate Wiki').click();
     await expect(button('Open export directory')).toBeVisible();
     expect(existsSync(join(exportPath, 'catalog.json'))).toBe(true);
+    const jsonPath = join(sample.data, 'catalog-download.json');
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
+    }, jsonPath);
+    await button('Export JSON').click();
+    await expect.poll(() => existsSync(jsonPath)).toBe(true);
+    expect(JSON.parse(readFileSync(jsonPath, 'utf8')).items.length).toBeGreaterThan(0);
 
     await navigate('Local settings');
     await app.evaluate(({ dialog }, path) => {
@@ -281,6 +364,16 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await header.getByRole('button', { name: 'Add project' }).click();
     await expect(page.locator('.project-path:visible')).toHaveText(sample.root);
     expect((await ifg(sample.root, 'case', 'list')).result.data.total).toBe(1);
+    await header.getByRole('button', { name: 'Manage projects' }).click();
+    await manager.getByRole('button', { name: 'Delete app data' }).click();
+    await page
+      .getByRole('dialog', { name: 'Delete app data', exact: true })
+      .getByRole('button', { name: 'Delete app data' })
+      .click();
+    await manager.getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByText('Add a Git project to get started')).toBeVisible();
+    expect(existsSync(join(sample.root, 'openapi.yml'))).toBe(true);
+    expect((await ifg(sample.root, 'project', 'list')).result.data).toEqual([]);
   } finally {
     await app.close();
     await close(mcp);

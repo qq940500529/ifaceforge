@@ -101,6 +101,7 @@ export function scanSource(
   adapters: Adapter[],
   service: string,
   diagnostics: Diagnostic[],
+  checkpoint?: () => void,
 ) {
   const observations: Observation[] = [];
   const javascript = extensions.test(path);
@@ -112,6 +113,7 @@ export function scanSource(
   ].filter((entry) => entry !== false);
   let inComment = false;
   for (const [index, line] of text.split(/\r?\n/).entries()) {
+    if (index % 256 === 0) checkpoint?.();
     const trimmed = line.trimStart();
     if (javascript && trimmed.startsWith('/*')) inComment = !trimmed.includes('*/');
     if (inComment || /^(?:\/\/|#|\/\*)/.test(trimmed)) {

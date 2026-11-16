@@ -58,6 +58,7 @@ function scanPath(
   text: string,
   source: SourceConfig,
   diagnostics: Diagnostic[],
+  checkpoint?: () => void,
 ) {
   if (/(^|\/)SKILL\.md$/.test(path)) return [parseSkill(project.root, path, text, diagnostics)];
   if (source.mcpConfigs?.includes(path) || /(^|\/)\.mcp\.json$/.test(path)) {
@@ -75,18 +76,28 @@ function scanPath(
   ) {
     return parseOpenApi(text, { root: project.root, path, service: source.id }, diagnostics);
   }
-  return scanSource(path, text, source.adapters ?? adapters, source.id, diagnostics);
+  return scanSource(path, text, source.adapters ?? adapters, source.id, diagnostics, checkpoint);
 }
 
-export function mergeObservations(observations: Observation[], runtime: RuntimeObservation[] = []): Entity[] {
-  const groups = new Map<string, Observation[]>();
-  for (const item of observations) {
-    const group = groups.get(item.id) ?? [];
-    if (!group.some((entry) => stableJson(entry) === stableJson(item))) group.push(item);
-    groups.set(item.id, group);
+export function mergeObservations(
+  observations: Observation[],
+  runtime: RuntimeObservation[] = [],
+  checkpoint?: () => void,
+): Entity[] {
+  const groups = new Map<string, Map<string, Observation>>();
+  for (const [index, item] of observations.entries()) {
+    if (index % 256 === 0) checkpoint?.();
+    let group = groups.get(item.id);
+    if (!group) {
+      group = new Map();
+      groups.set(item.id, group);
+    }
+    const identity = stableJson(item);
+    if (!group.has(identity)) group.set(identity, item);
   }
   return [...groups.values()]
-    .map((group) => {
+    .map((entries) => {
+      const group = [...entries.values()];
       const first = group.find((entry) => entry.origin === 'declaration') ?? group[0];
       const sources = new Set(group.map((entry) => entry.origin));
       const differences: string[] = [];
@@ -205,13 +216,16 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
         old?.digest === hash && !mayReference ? old : { digest: hash, diagnostics: [], observations: [] };
       if (old !== file) {
         for (const source of scopeSources) {
-          file.observations.push(...scanPath(project, path, text, source, file.diagnostics));
+          for (const item of scanPath(project, path, text, source, file.diagnostics, check)) {
+            file.observations.push(item);
+          }
         }
         cache.push([key, file]);
       }
-      diagnostics.push(...file.diagnostics);
-      observations.push(...file.observations);
+      for (const item of file.diagnostics) diagnostics.push(item);
+      for (const item of file.observations) observations.push(item);
     } catch (error) {
+      check();
       complete = false;
       diagnostics.push({
         path,
@@ -236,7 +250,7 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
     complete,
     diagnostics,
     worktree: digest(stableJson(hashes)),
-    entities: mergeObservations(observations),
+    entities: [],
   };
   options.progress?.({ stage: 'saving', processed, total: files.length, warnings: diagnostics.length });
   check();
@@ -245,7 +259,9 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
     snapshot.entities = mergeObservations(
       [...observations, ...runtime.flatMap((target) => target.observations)],
       runtime,
+      check,
     );
+    check();
     for (const [key, file] of cache) repository.put('scan_files', key, file);
     repository.put('scans', snapshot.id, snapshot);
     if (complete) repository.set('activeSnapshot', snapshot.id);
