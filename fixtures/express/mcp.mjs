@@ -36,6 +36,20 @@ export function makeMcp() {
     contents: [{ uri: uri.href, text: 'Sample task 42' }],
   }));
   server.registerResource(
+    'sample-image',
+    'fixture://sample-image',
+    { mimeType: 'image/png', description: 'Synthetic PNG for preview tests' },
+    (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: 'image/png',
+          blob: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlM8wAAAABJRU5ErkJggg==',
+        },
+      ],
+    }),
+  );
+  server.registerResource(
     'task-template',
     new ResourceTemplate('task://{id}', { list: undefined }),
     {},
@@ -58,7 +72,17 @@ export function makeMcp() {
           tools: [
             {
               name: 'echo',
-              inputSchema: { ...emptyInput, properties: { value: { type: 'string' } }, required: ['value'] },
+              description: 'Return the supplied value in text and structured JSON.',
+              inputSchema: {
+                ...emptyInput,
+                properties: { value: { type: 'string', description: 'Text to echo' } },
+                required: ['value'],
+              },
+              outputSchema: {
+                ...emptyInput,
+                properties: { value: { type: 'string' }, pid: { type: 'integer' } },
+                required: ['value', 'pid'],
+              },
             },
             {
               name: 'remember',

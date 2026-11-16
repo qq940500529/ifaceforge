@@ -7,7 +7,7 @@ import type { Repository } from '../storage/repository.js';
 import { validate } from '../schemas/index.js';
 import { apiContract, compare, httpChecks, type Assertion, type Check } from './api.js';
 import { prepareHttp, sendHttp, type HttpRequest } from '../protocols/http.js';
-import { McpSession, type Discovery, type McpAction } from '../protocols/mcp.js';
+import { McpSession, bindMcpAction, resolveMcpTarget, type Discovery, type McpAction } from '../protocols/mcp.js';
 import { Bindings, secretName, type Profile } from '../protocols/variables.js';
 import { mcpId } from '../scanner/model.js';
 import { saveRuntime } from './catalog.js';
@@ -23,7 +23,7 @@ export type Case = {
   extract?: Record<string, string>;
 } & (
   | { kind: 'http'; request: HttpRequest }
-  | { kind: 'mcp'; request: { tool: string; arguments: Record<string, unknown> } }
+  | { kind: 'mcp'; request: McpAction | { tool: string; arguments: Record<string, unknown> } }
 );
 export interface Suite {
   schemaVersion: 1;
@@ -157,7 +157,7 @@ export function testPlan(repository: Repository, caseId?: string, suiteId?: stri
       const request: Step['request'] =
         item.kind === 'http'
           ? { kind: 'http', template: item.request }
-          : { kind: 'mcp', action: { type: 'call', ...item.request } };
+          : { kind: 'mcp', action: 'type' in item.request ? item.request : { type: 'call', ...item.request } };
       return {
         id,
         version,
@@ -230,7 +230,7 @@ export class RunExecutor {
   }
 
   mcp(
-    steps: (McpAction & { id: string; extract?: Record<string, string> })[],
+    steps: (McpAction & { id: string; extract?: Record<string, string>; assertions?: Assertion[] })[],
     profile: string,
     service?: string,
     connection?: string,
@@ -244,9 +244,10 @@ export class RunExecutor {
       kind: 'mcp',
       subject: steps[0]?.type ?? 'mcp',
       profile,
-      steps: steps.map(({ id, extract, ...action }) => ({
+      steps: steps.map(({ id, extract, assertions, ...action }) => ({
         id,
         extract,
+        assertions,
         profile,
         request: { kind: 'mcp', action, service, connection },
       })),
@@ -364,7 +365,8 @@ export class RunExecutor {
               sessions.set(profile.id, session);
             }
             for (const value of connection?.bindings.secrets ?? []) bindings.hide(value);
-            const action = bindings.resolve(step.request.action) as McpAction;
+            const input = bindMcpAction(step.request.action, bindings);
+            const action = resolveMcpTarget(input);
             let inventory: Discovery | undefined;
             if (
               action.type === 'discover' ||
@@ -381,7 +383,7 @@ export class RunExecutor {
             if (action.type === 'discover') result = inventory;
             else {
               session.validate(action);
-              sent(action);
+              sent(input.type === 'template' && action.type === 'read' ? { ...input, uri: action.uri } : action);
               result = await session.execute(action, signal, (progress) => {
                 record.progress = bindings.redact(progress);
                 save();

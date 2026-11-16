@@ -1,23 +1,19 @@
-import { Button, Card, Input, InputNumber, Modal, Select, Space, Tabs, Typography } from 'antd';
+import { Button, Card, Input, InputNumber, Modal, Select, Space, Typography } from 'antd';
 import { useRef, useState } from 'react';
 import type { Assertion } from '../app/api.js';
 import type { Case } from '../app/runs.js';
 import type { HttpRequest } from '../protocols/http.js';
-import type { Discovery } from '../protocols/mcp.js';
 import type { Pair } from '../protocols/variables.js';
 import type { Entity } from '../scanner/model.js';
 import { copyText, download, unwrap } from './client.js';
 import { CatalogList, EntityDetail, useCatalog } from './catalog-page.js';
 import {
   Code,
-  EmptyView,
   ErrorView,
   Field,
   JsonField,
-  Label,
   ProfilePicker,
   RunPanel,
-  TextButtonList,
   json,
   parse,
   useProfiles,
@@ -25,7 +21,7 @@ import {
   useWorkspace,
 } from './components.js';
 
-function SaveCase({ open, close, make }: { open: boolean; close: () => void; make: () => Partial<Case> }) {
+export function SaveCase({ open, close, make }: { open: boolean; close: () => void; make: () => Partial<Case> }) {
   const { t, refresh, notify, command } = useWorkspace();
   const [id, setId] = useState('');
   const [name, setName] = useState('');
@@ -395,295 +391,6 @@ function RequestPairs({
         <summary>{t(kind)}</summary>
         <JsonField label={t(kind)} value={value} change={change} rows={3} />
       </details>
-    </div>
-  );
-}
-
-export function McpPage() {
-  const { t, refresh, command } = useWorkspace();
-  const profiles = useProfiles();
-  const action = useRun();
-  const list = useCatalog('mcp');
-  const [profile, setProfile] = useState<string>();
-  const [connection, setConnection] = useState<{ id: string; protocolVersion?: string }>();
-  const [inventoryId, setInventoryId] = useState('');
-  const [inventory, setInventory] = useState<Discovery>();
-  const [argument, setArgument] = useState('{}');
-  const [uri, setUri] = useState('');
-  const [selected, setSelected] = useState<{ type: string; name: string; details: Record<string, unknown> }>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>();
-  const [saving, setSaving] = useState(false);
-  const chosen = profiles.data?.items.find((item) => item.id === profile);
-  const discovered =
-    action.run?.subject === 'discover' ? (action.run.steps[0]?.result as Discovery | undefined) : undefined;
-  const effective = discovered ?? inventory;
-  if (discovered && action.run!.id !== inventoryId) {
-    setInventoryId(action.run!.id);
-    setInventory(discovered);
-  }
-  async function connect() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      setConnection(await command('mcp connect', { profile }));
-    } catch (error) {
-      setError(error);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function disconnect() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await command('mcp disconnect', { id: connection?.id });
-      setConnection(undefined);
-      setInventory(undefined);
-      setSelected(undefined);
-      action.setRun(undefined);
-    } catch (error) {
-      setError(error);
-    } finally {
-      setBusy(false);
-    }
-  }
-  const execute = (name: string, id?: string) =>
-    void action.start(() =>
-      command(name, {
-        id,
-        profile,
-        connection: connection?.id,
-        args: name === 'mcp call' || name === 'mcp prompt' ? parse(argument) : undefined,
-      }),
-    );
-  return (
-    <div className="split">
-      <div className="stack">
-        <Card size="small" title={t('connections')}>
-          <div className="stack">
-            <ErrorView error={error} />
-            <ProfilePicker
-              profiles={(profiles.data?.items ?? []).filter((item) => item.mcp)}
-              value={profile}
-              change={(value) => {
-                if (!connection) setProfile(value);
-              }}
-            />
-            {chosen?.mcp && (
-              <details>
-                <summary>{t('details')}</summary>
-                <Code value={chosen.mcp} />
-              </details>
-            )}
-            <Space wrap>
-              {connection ? (
-                <>
-                  <Label value="connected" />
-                  {connection.protocolVersion}
-                  <Button onClick={() => void disconnect()} loading={busy}>
-                    {t('disconnect')}
-                  </Button>
-                  <Button
-                    type="primary"
-                    loading={action.pending}
-                    onClick={() => {
-                      execute('mcp discover');
-                      refresh();
-                    }}
-                  >
-                    {t('discover')}
-                  </Button>
-                </>
-              ) : (
-                <Button type="primary" disabled={!chosen} loading={busy} onClick={() => void connect()}>
-                  {t('connect')}
-                </Button>
-              )}
-            </Space>
-          </div>
-        </Card>
-        <CatalogList list={list} />
-        {list.detail.data && <EntityDetail entity={list.detail.data} />}
-      </div>
-      <div className="stack">
-        <Card size="small" title={t('definition')}>
-          {effective ? (
-            <Tabs
-              onChange={() => setSelected(undefined)}
-              items={effective.groups.map((group) => ({
-                key: group.type,
-                label: t(group.type),
-                children: (
-                  <div className="stack">
-                    <Label value={group.state} />
-                    {group.error !== undefined && <Code value={group.error} />}
-                    <TextButtonList
-                      items={group.items}
-                      id={(item) => String(item.name ?? item.uri ?? item.uriTemplate)}
-                      name={(item) => String(item.name ?? item.uri ?? item.uriTemplate)}
-                      choose={(item) => {
-                        const name = String(item.name ?? item.uri ?? item.uriTemplate);
-                        setSelected({ type: group.type, name, details: item });
-                        setUri(String(item.uri ?? item.uriTemplate ?? ''));
-                        const schema = item.inputSchema as
-                          { properties?: Record<string, { default?: unknown }> } | undefined;
-                        const argumentsDraft = Object.fromEntries(
-                          Object.entries(schema?.properties ?? {})
-                            .filter(([, prop]) => prop?.default !== undefined)
-                            .map(([key, prop]) => [key, prop.default]),
-                        );
-                        setArgument(json(argumentsDraft));
-                      }}
-                    />
-                  </div>
-                ),
-              }))}
-            />
-          ) : (
-            <Typography.Text type="secondary">{t('noConnection')}</Typography.Text>
-          )}
-        </Card>
-        {selected && (
-          <Card size="small" title={selected.name}>
-            <div className="stack">
-              <details>
-                <summary>{t('definition')}</summary>
-                <Code value={selected.details} />
-              </details>
-              {selected.type === 'tool' && (
-                <ToolFields schema={selected.details.inputSchema} value={argument} change={setArgument} />
-              )}
-              {['tool', 'prompt'].includes(selected.type) ? (
-                <details open={selected.type === 'prompt' ? true : undefined}>
-                  <summary>{t('argument')}</summary>
-                  <JsonField label={t('argument')} value={argument} change={setArgument} />
-                </details>
-              ) : (
-                <Field label={t('uri')}>
-                  <Input value={uri} onChange={(event) => setUri(event.target.value)} />
-                </Field>
-              )}
-              <Space wrap>
-                {selected.type === 'tool' ? (
-                  <>
-                    <Button
-                      type="primary"
-                      disabled={!connection}
-                      loading={action.pending}
-                      onClick={() => execute('mcp call', selected.name)}
-                    >
-                      {t('call')}
-                    </Button>
-                    <Button onClick={() => setSaving(true)}>{t('saveCase')}</Button>
-                  </>
-                ) : selected.type === 'prompt' ? (
-                  <Button
-                    type="primary"
-                    disabled={!connection}
-                    loading={action.pending}
-                    onClick={() => execute('mcp prompt', selected.name)}
-                  >
-                    {t('getPrompt')}
-                  </Button>
-                ) : (
-                  <Button
-                    type="primary"
-                    disabled={!connection}
-                    loading={action.pending}
-                    onClick={() => execute('mcp read', uri)}
-                  >
-                    {t('read')}
-                  </Button>
-                )}
-              </Space>
-            </div>
-          </Card>
-        )}
-        <Card size="small" title={t('response')}>
-          {connection || action.run ? <RunPanel action={action} /> : <EmptyView select />}
-        </Card>
-      </div>
-      {saving && selected && (
-        <SaveCase
-          open
-          close={() => setSaving(false)}
-          make={() => ({
-            kind: 'mcp',
-            profile,
-            request: { tool: selected.name, arguments: parse(argument) as Record<string, unknown> },
-            assertions: [{ type: 'toolError', equals: false }],
-          })}
-        />
-      )}
-    </div>
-  );
-}
-
-type ToolProperty = { type?: string; enum?: unknown[] };
-
-function ToolFields({
-  schema,
-  value,
-  change,
-}: {
-  schema: unknown;
-  value: string;
-  change: (value: string) => void;
-}) {
-  const shape = schema as { properties?: Record<string, ToolProperty>; required?: string[] } | undefined;
-  let current: Record<string, unknown>;
-  try {
-    const parsed = parse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    current = parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  const props = Object.entries(shape?.properties ?? {}).filter(
-    ([, prop]) => ['string', 'number', 'integer', 'boolean'].includes(prop?.type ?? '') && !prop.enum,
-  );
-  if (!props.length) return null;
-  const update = (key: string, field: unknown) => {
-    const args = { ...current };
-    if (field === undefined) delete args[key];
-    else args[key] = field;
-    change(json(args));
-  };
-  return (
-    <div className="split split-even">
-      {props.map(([key, prop]) => {
-        const label = key + (shape?.required?.includes(key) ? ' *' : '');
-        return (
-          <Field key={key} label={label}>
-            {prop.type === 'boolean' ? (
-              <Select<string | undefined>
-                aria-label={label}
-                allowClear
-                value={typeof current[key] === 'boolean' ? String(current[key]) : undefined}
-                onChange={(field) => update(key, field === undefined ? undefined : field === 'true')}
-                options={[
-                  { value: 'true', label: 'true' },
-                  { value: 'false', label: 'false' },
-                ]}
-              />
-            ) : prop.type === 'string' ? (
-              <Input
-                aria-label={label}
-                value={typeof current[key] === 'string' ? (current[key] as string) : ''}
-                onChange={(event) => update(key, event.target.value)}
-              />
-            ) : (
-              <InputNumber
-                aria-label={label}
-                precision={prop.type === 'integer' ? 0 : undefined}
-                value={typeof current[key] === 'number' ? (current[key] as number) : null}
-                onChange={(field) => update(key, field ?? undefined)}
-              />
-            )}
-          </Field>
-        );
-      })}
     </div>
   );
 }

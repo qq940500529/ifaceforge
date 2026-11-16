@@ -167,10 +167,12 @@ export function ProfilePicker({
   profiles,
   value,
   change,
+  disabled,
 }: {
   profiles: Profile[];
   value?: string;
   change: (id?: string) => void;
+  disabled?: boolean;
 }) {
   const { t } = useWorkspace();
   return (
@@ -179,6 +181,7 @@ export function ProfilePicker({
       aria-label={t('profile')}
       placeholder={t('selectProfile')}
       allowClear
+      disabled={disabled}
       value={value}
       onChange={change}
       options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))}
@@ -234,7 +237,15 @@ export function useRun() {
   return { run, setRun, error, pending: pending || run?.status === 'running', start, cancel };
 }
 
-export function RunView({ run, cancel }: { run?: Run; cancel: () => void }) {
+export function RunView({
+  run,
+  cancel,
+  renderResult,
+}: {
+  run?: Run;
+  cancel: () => void;
+  renderResult?: (result: unknown) => ReactNode;
+}) {
   const { t } = useWorkspace();
   if (!run) return <EmptyView select />;
   return (
@@ -278,8 +289,19 @@ export function RunView({ run, cancel }: { run?: Run; cancel: () => void }) {
                   {response.truncated && <Tag color="orange">{t('truncated')}</Tag>}
                 </Space>
               )}
-              {response?.text !== undefined && <Code value={response.text} />}
-              {protocolPreview !== undefined && <Code value={protocolPreview} />}
+              {renderResult && step.durationMs !== undefined && (
+                <Typography.Text type="secondary">
+                  {t('elapsed')} {step.durationMs} ms
+                </Typography.Text>
+              )}
+              {renderResult && step.result !== undefined ? (
+                renderResult(step.result)
+              ) : (
+                <>
+                  {response?.text !== undefined && <Code value={response.text} />}
+                  {protocolPreview !== undefined && <Code value={protocolPreview} />}
+                </>
+              )}
               {step.checks?.map((check, index) => (
                 <div key={index} className="stack">
                   <Space>

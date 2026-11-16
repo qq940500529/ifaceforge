@@ -200,9 +200,17 @@ export class Workbench {
       case 'mcp disconnect':
         return executor.disconnect(id());
       case 'mcp discover':
-        return batch([{ id: 'discover', type: 'discover' }]);
+        return batch([
+          {
+            id: 'discover',
+            type: 'discover',
+            assertions:
+              input.assertions === undefined ? undefined : validate<Assertion[]>('assertions', input.assertions),
+          },
+        ]);
       case 'mcp call':
       case 'mcp read':
+      case 'mcp template':
       case 'mcp prompt': {
         const args = input.args ?? {};
         const action: McpAction =
@@ -210,10 +218,18 @@ export class Workbench {
             ? { type: 'call', tool: id(), arguments: args as Record<string, unknown> }
             : command === 'mcp read'
               ? { type: 'read', uri: id() }
-              : { type: 'prompt', name: id(), arguments: args as Record<string, string> };
+              : command === 'mcp template'
+                ? { type: 'template', uriTemplate: id(), arguments: args as Record<string, unknown> }
+                : { type: 'prompt', name: id(), arguments: args as Record<string, string> };
         const data = validate<{ steps: Parameters<RunExecutor['mcp']>[0] }>('mcp-batch', {
           schemaVersion: 1,
-          steps: [{ ...action, id: action.type }],
+          steps: [
+            {
+              ...action,
+              id: action.type,
+              ...(input.assertions === undefined ? {} : { assertions: input.assertions }),
+            },
+          ],
         });
         return batch(data.steps);
       }
@@ -231,7 +247,9 @@ export class Workbench {
             .map((run) => (run.status === 'running' ? recoverRun(repository, run.id) : run))
             .filter(
               (run) =>
-                (!input.state || input.state === run.status) && (!input.kind || String(input.kind) === run.kind),
+                (!input.state || input.state === run.status) &&
+                (!input.kind || String(input.kind) === run.kind) &&
+                (!input.profile || input.profile === run.profile),
             ),
         );
       case 'run show':

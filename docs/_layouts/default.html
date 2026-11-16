@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="{{ page.lang | default: site.lang }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page.title | default: site.title | escape }}{% unless page.home %} · IfaceForge{% endunless %}</title>
+    <meta name="description" content="{{ site.description | escape }}">
+    <link rel="stylesheet" href="{{ '/assets/pages.css' | relative_url }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="wordmark" href="{{ '/' | relative_url }}"><span class="brand-mark" aria-hidden="true">{ }</span> IfaceForge</a>
+        <nav aria-label="文档导航">
+          <a href="{{ '/workbench.html' | relative_url }}">手册</a>
+          <a href="{{ '/mcp.html' | relative_url }}">MCP</a>
+          <a href="{{ '/cli.html' | relative_url }}">CLI</a>
+          <a href="{{ '/README.en.html' | relative_url }}" lang="en">English</a>
+          <a class="nav-github" href="https://github.com/qq940500529/ifaceforge">GitHub ↗</a>
+        </nav>
+      </div>
+    </header>
+    <main class="shell{% unless page.home %} doc-content{% endunless %}">
+      {{ content }}
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <span>MIT · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司</span>
+        <a href="https://github.com/qq940500529/ifaceforge/discussions">Discussions ↗</a>
+      </div>
+    </footer>
+  </body>
+</html>

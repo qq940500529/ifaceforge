@@ -18,7 +18,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { command as browserCommand } from './client.js';
 import { CatalogPage } from './catalog-page.js';
-import { ApiPage, McpPage } from './debug-pages.js';
+import { ApiPage } from './debug-pages.js';
+import { McpPage } from './mcp-page.js';
 import { SettingsPage, TestPage, WikiPage } from './manage-pages.js';
 import { Code, ErrorView, Loading, Workspace, useLoad, type Project } from './components.js';
 import { translator, type Language } from './i18n.js';
@@ -34,7 +35,12 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
   const { message } = AntApp.useApp();
   const [localLang, setLang] = useState(defaultLocale);
   const lang = desktop?.lang ?? localLang;
-  const [page, setPage] = useState<Page>('catalog');
+  const [page, selectPage] = useState<Page>('catalog');
+  const [mcpVisited, setMcpVisited] = useState(false);
+  function setPage(next: Page) {
+    if (next === 'mcp') setMcpVisited(true);
+    selectPage(next);
+  }
   const [revision, setRevision] = useState(0);
   const [browserScan, setScan] = useState<{ complete: boolean; diagnostics: unknown[] }>();
   const [browserScanning, setScanning] = useState(false);
@@ -243,14 +249,17 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
                   <CatalogPage key="skill" kind="skill" />
                 ) : page === 'api' ? (
                   <ApiPage />
-                ) : page === 'mcp' ? (
-                  <McpPage />
-                ) : page === 'tests' ? (
+                ) : page === 'mcp' ? null : page === 'tests' ? (
                   <TestPage />
                 ) : page === 'wiki' ? (
                   <WikiPage />
                 ) : (
                   <SettingsPage />
+                )}
+                {project.data && mcpVisited && (
+                  <div hidden={page !== 'mcp'}>
+                    <McpPage />
+                  </div>
                 )}
               </div>
             </Layout.Content>
