@@ -199,7 +199,14 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     const page = await app.firstWindow();
     const header = page.locator('.desktop-header');
     const navigate = (name: string) => page.getByRole('menuitem', { name, exact: true }).click();
-    const button = (name: string) => page.getByRole('button', { name, exact: true });
+    const button = (name: string) =>
+      page
+        .getByRole('button', { name, exact: true })
+        .or(
+          page
+            .locator('button:visible')
+            .filter({ hasText: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }),
+        );
     const snapshot = (name: string) =>
       page.screenshot({
         path: info.outputPath(name + '.png'),

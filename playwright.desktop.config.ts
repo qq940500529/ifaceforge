@@ -5,6 +5,7 @@ export default defineConfig({
   timeout: 90000,
   expect: { timeout: 12000 },
   workers: 1,
+  retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-desktop-report' }]],
   use: { screenshot: 'only-on-failure', actionTimeout: 10000 },
 });
