@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const archive = resolve(process.argv[2] ?? '');
-const base = realpathSync(tmpdir());
+const base = realpathSync.native(tmpdir());
 const stage = mkdtempSync(join(base, 'ifaceforge-package-check-'));
 const git = (args) => execFileSync('git', args, { stdio: 'ignore' });
 try {
@@ -56,7 +56,7 @@ try {
     }
   }
 } finally {
-  if (dirname(realpathSync(stage)) === base) {
+  if (dirname(realpathSync.native(stage)) === base) {
     try {
       rmSync(stage, { recursive: true, force: true, maxRetries: 4, retryDelay: 150 });
     } catch (error) {

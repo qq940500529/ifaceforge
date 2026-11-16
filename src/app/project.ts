@@ -21,7 +21,7 @@ export class ProjectError extends Error {
 export function resolveProject(directory: string): ProjectPaths {
   let start: string;
   try {
-    start = realpathSync(resolve(directory));
+    start = realpathSync.native(resolve(directory));
   } catch {
     throw new ProjectError('INVALID_PROJECT', `Cannot open project directory: ${directory}`);
   }
@@ -40,7 +40,7 @@ export function resolveProject(directory: string): ProjectPaths {
     throw new ProjectError('INVALID_PROJECT', `Not inside a Git working tree: ${start}`);
   }
 
-  const root = realpathSync(rootPath);
+  const root = realpathSync.native(rootPath);
   const data = join(root, '.devtools', 'ifaceforge', 'data');
   return { root, data, config: join(root, '.ifaceforge.json'), database: join(data, 'workbench.sqlite') };
 }

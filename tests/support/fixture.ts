@@ -8,7 +8,7 @@ import type { Server } from 'node:http';
 export const repositoryRoot = resolve(import.meta.dirname, '../..');
 const cli = resolve(process.env.IFG_TEST_CLI ?? join(repositoryRoot, 'dist', 'cli', 'main.js'));
 const runFile = promisify(execFile);
-const parent = realpathSync(tmpdir());
+const parent = realpathSync.native(tmpdir());
 
 export function fixture(name = 'express') {
   const root = mkdtempSync(join(parent, 'ifaceforge 项目 with spaces '));
@@ -24,7 +24,7 @@ export function fixture(name = 'express') {
       return target;
     },
     destroy() {
-      if (dirname(realpathSync(root)) !== parent) throw new Error('Unexpected fixture directory');
+      if (dirname(realpathSync.native(root)) !== parent) throw new Error('Unexpected fixture directory');
       rmSync(root, { recursive: true });
     },
   };

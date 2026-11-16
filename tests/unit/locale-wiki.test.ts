@@ -22,7 +22,7 @@ it('keeps locale keys and placeholders in sync', () => {
 });
 
 it('merges notes, preserves unowned documents and restores the database and notes', async () => {
-  const parent = realpathSync(tmpdir());
+  const parent = realpathSync.native(tmpdir());
   const root = mkdtempSync(join(parent, 'ifg Wiki 测试 '));
   execFileSync('git', ['init', '-q', root]);
   mkdirSync(join(root, 'read'));
@@ -55,7 +55,7 @@ it('merges notes, preserves unowned documents and restores the database and note
     expect(previewWiki(project, repository).pages[built.catalog.items[0].page]).toContain('人工内容');
   } finally {
     db.close();
-    if (dirname(realpathSync(root)) !== parent) throw Error('Unexpected fixture path');
+    if (dirname(realpathSync.native(root)) !== parent) throw Error('Unexpected fixture path');
     rmSync(root, { recursive: true });
   }
 });

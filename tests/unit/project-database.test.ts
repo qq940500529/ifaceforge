@@ -7,7 +7,7 @@ import { resolveProject } from '../../src/app/project.js';
 import { openProjectDatabase } from '../../src/storage/database.js';
 
 const fixtures: string[] = [];
-const fixtureParent = realpathSync(tmpdir());
+const fixtureParent = realpathSync.native(tmpdir());
 
 function makeDirectory(): string {
   const directory = mkdtempSync(join(fixtureParent, 'ifaceforge 测试 '));
@@ -23,7 +23,7 @@ function makeProject(): string {
 
 afterEach(() => {
   for (const fixture of fixtures.splice(0)) {
-    const resolved = realpathSync(fixture);
+    const resolved = realpathSync.native(fixture);
     if (dirname(resolved) !== fixtureParent) throw new Error('Fixture escaped the temporary directory');
     rmSync(resolved, { recursive: true });
   }
@@ -35,7 +35,7 @@ describe('project storage', () => {
     const nested = join(root, '测试 subdirectory');
     mkdirSync(nested);
     const project = resolveProject(nested);
-    expect(project.root).toBe(realpathSync(root));
+    expect(project.root).toBe(realpathSync.native(root));
     expect(project.database).toBe(join(project.root, '.devtools', 'ifaceforge', 'data', 'workbench.sqlite'));
   });
 

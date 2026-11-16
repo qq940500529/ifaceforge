@@ -10,11 +10,11 @@ import { checkConfig } from '../../src/app/config.js';
 import { activeSnapshot, diffScans, scanProject, searchCatalog } from '../../src/app/catalog.js';
 import { parseJson } from '../../src/app/files.js';
 
-const parent = realpathSync(tmpdir());
+const parent = realpathSync.native(tmpdir());
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) {
-    if (dirname(realpathSync(root)) !== parent) throw Error('Unexpected fixture path');
+    if (dirname(realpathSync.native(root)) !== parent) throw Error('Unexpected fixture path');
     rmSync(root, { recursive: true });
   }
 });

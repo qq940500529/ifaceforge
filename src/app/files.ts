@@ -16,7 +16,7 @@ export function projectFile(root: string, path: string, mustExist = true): strin
   let ancestor = entry;
   for (;;) {
     try {
-      if (!isInside(root, realpathSync(ancestor))) invalid('Path resolves outside project', { path });
+      if (!isInside(root, realpathSync.native(ancestor))) invalid('Path resolves outside project', { path });
       return entry;
     } catch (error) {
       if (mustExist || (error as NodeJS.ErrnoException).code !== 'ENOENT' || ancestor === root) throw error;
