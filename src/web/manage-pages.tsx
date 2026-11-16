@@ -287,21 +287,26 @@ export function WikiPage() {
   const [page, setPage] = useState('README.md');
   const [preview, setPreview] = useState<WikiPreview>();
   const [activeExport, setExport] = useState<WikiExport>();
-  const [note, setNote] = useState('');
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const scans = useLoad(() => command<Listed<Snapshot>>('scan list'), [revision]);
   const exports = useLoad(() => command<Listed<WikiExport>>('wiki list'), [revision]);
   const item = preview?.catalog.items.find((item) => item.page === page);
+  const note = item ? notes[item.id] : undefined;
   useEffect(() => {
     let active = true;
-    setNote('');
-    if (item)
+    if (item && note === undefined)
       void command<{ text: string }>('wiki note-show', { id: item.id })
         .then((result) => {
-          if (active) setNote(result.text);
+          if (active)
+            setNotes((drafts) =>
+              Object.hasOwn(drafts, item.id) ? drafts : { ...drafts, [item.id]: result.text },
+            );
         })
-        .catch(setError);
+        .catch((error: unknown) => {
+          if (active) setError(error);
+        });
     return () => {
       active = false;
     };
@@ -464,15 +469,18 @@ export function WikiPage() {
             <Card size="small" title={t('note')}>
               <div className="stack">
                 <Input.TextArea
-                  value={note}
+                  value={note ?? ''}
+                  disabled={note === undefined || busy}
                   rows={5}
                   aria-label={t('note')}
-                  onChange={(event) => setNote(event.target.value)}
+                  onChange={(event) => setNotes((drafts) => ({ ...drafts, [item.id]: event.target.value }))}
                 />
                 <Button
                   loading={busy}
+                  disabled={note === undefined}
                   onClick={() =>
                     void operation(async () => {
+                      if (note === undefined) return;
                       await command('wiki note-put', { id: item.id, body: note });
                       await load();
                       notify(t('success'));

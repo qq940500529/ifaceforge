@@ -327,6 +327,11 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await expect(changes.locator('..')).toHaveAttribute('open', '');
     await snapshot('wiki-changes');
     await changes.click();
+    await button('read-tasks').click();
+    const note = page.getByRole('textbox', { name: 'Notes', exact: true });
+    await note.fill('Desktop QA note');
+    await button('Save note').click();
+    await expect(page.getByText('Desktop QA note', { exact: true })).toBeVisible();
     await page.getByTestId('wiki-build').click();
     await expect(page.getByTestId('wiki-open')).toBeVisible();
     expect(existsSync(join(exportPath, 'catalog.json'))).toBe(true);
