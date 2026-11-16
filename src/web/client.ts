@@ -1,4 +1,5 @@
 import type { CommandInput } from '../app/workbench.js';
+import type { Result } from '../desktop/protocol.js';
 
 let bootstrap: Promise<string> | undefined;
 export class WebError extends Error {
@@ -32,7 +33,28 @@ export async function command<T>(name: string, input: CommandInput = {}): Promis
   }
   return result as T;
 }
+export async function unwrap<T>(result: Promise<Result<T>>): Promise<T> {
+  const value = await result;
+  if (!value.ok) throw new WebError(value.error.code, value.error.message, value.error.details);
+  return value.data;
+}
+
+export function scopedCommand(project: string): typeof command {
+  return async <T>(name: string, input: CommandInput = {}): Promise<T> =>
+    unwrap(window.ifaceforge!.command(project, name, input)) as Promise<T>;
+}
+
+export async function copyText(text: string) {
+  if (window.ifaceforge) return unwrap(window.ifaceforge.copy(text));
+  return navigator.clipboard.writeText(text);
+}
+
 export function download(name: string, data: unknown) {
+  if (window.ifaceforge) {
+    return unwrap(
+      window.ifaceforge.download(name, typeof data === 'string' ? data : JSON.stringify(data, null, 2)),
+    );
+  }
   const url = URL.createObjectURL(
     new Blob([typeof data === 'string' ? data : JSON.stringify(data, null, 2)], { type: 'text/plain' }),
   );

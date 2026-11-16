@@ -1,0 +1,21 @@
+name: Bug report
+description: Report a reproducible IfaceForge problem
+title: '[Bug] '
+body:
+  - type: input
+    attributes:
+      label: Version and platform
+      placeholder: IfaceForge version, OS version, architecture
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Use a synthetic project and omit credentials and private paths.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Observed and expected behavior
+    validations:
+      required: true

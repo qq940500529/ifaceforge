@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createServer } from 'node:http';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { address, close, fixture, ifg, repositoryRoot } from '../support/fixture.js';
+import { address, browserWorkbench, close, fixture, ifg, repositoryRoot } from '../support/fixture.js';
 // @ts-expect-error JavaScript fixture is also runnable directly from Node.
 import { taskApp } from '../../fixtures/express/app.mjs';
 // @ts-expect-error JavaScript fixture is also runnable directly from Node.
@@ -16,7 +16,8 @@ for (const language of ['en', 'zh-CN'] as const) {
       const service = createServer(taskApp());
       const serviceUrl = await address(service);
       const zh = language === 'zh-CN';
-      const url = (await ifg(root, 'start', '--no-open')).result.data?.url;
+      const host = await browserWorkbench(root);
+      const { url } = host;
       const label = (en: string, cn: string) => (zh ? cn : en);
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
@@ -58,9 +59,7 @@ for (const language of ['en', 'zh-CN'] as const) {
         await page.getByRole('menuitem', { name: 'Wiki', exact: true }).click();
         await page.getByRole('button', { name: label('Generate Wiki', '生成 Wiki') }).click();
         await expect(page.getByRole('heading', { name: label('IfaceForge Wiki', '接口工坊 Wiki') })).toBeVisible();
-        const catalog = JSON.parse(
-          readFileSync(join(root, '.devtools', 'ifaceforge', 'data', 'wiki', 'catalog.json'), 'utf8'),
-        );
+        const catalog = JSON.parse(readFileSync(join(host.data, 'wiki', 'catalog.json'), 'utf8'));
         expect(catalog.locale).toBe(language);
         await page.getByRole('button', { name: zh ? 'English' : '简体中文', exact: true }).click();
         await expect
@@ -81,7 +80,7 @@ for (const language of ['en', 'zh-CN'] as const) {
           });
         }
       } finally {
-        await ifg(root, 'stop');
+        await host.stop();
         await close(service);
         destroy();
       }
@@ -93,6 +92,7 @@ test('discovers an MCP tool and submits a schema field through the Web interface
   const { root, write, destroy } = fixture();
   const service = mcpHttp();
   const target = await address(service);
+  const host = await browserWorkbench(root);
   try {
     const profile = await ifg(
       root,
@@ -107,9 +107,7 @@ test('discovers an MCP tool and submits a schema field through the Web interface
       }),
     );
     expect(profile.exit).toBe(0);
-    const start = await ifg(root, 'start', '--no-open');
-    expect(start.exit).toBe(0);
-    await page.goto(start.result.data.url);
+    await page.goto(host.url);
     await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
     await page.getByRole('combobox', { name: 'Profile', exact: true }).click();
     await page.getByRole('option', { name: 'MCP demo', exact: true }).click();
@@ -122,7 +120,7 @@ test('discovers an MCP tool and submits a schema field through the Web interface
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
   } finally {
-    await ifg(root, 'stop');
+    await host.stop();
     await close(service);
     destroy();
   }

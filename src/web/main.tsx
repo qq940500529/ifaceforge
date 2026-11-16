@@ -16,25 +16,32 @@ import type { Locale as AntLocale } from 'antd/es/locale/index.js';
 import zhCN from 'antd/es/locale/zh_CN.js';
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { command } from './client.js';
+import { command as browserCommand } from './client.js';
 import { CatalogPage } from './catalog-page.js';
 import { ApiPage, McpPage } from './debug-pages.js';
 import { SettingsPage, TestPage, WikiPage } from './manage-pages.js';
 import { Code, ErrorView, Loading, Workspace, useLoad, type Project } from './components.js';
 import { translator, type Language } from './i18n.js';
 import './styles.css';
+import { DesktopApplication, type DesktopContext } from './desktop.js';
 
 const pages = ['catalog', 'api', 'mcp', 'skill', 'tests', 'wiki', 'settings'] as const;
 type Page = (typeof pages)[number];
 const defaultLocale: Language = navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 
-function Application() {
+export function Application({ desktop }: { desktop?: DesktopContext }) {
+  const command = desktop?.command ?? browserCommand;
   const { message } = AntApp.useApp();
-  const [lang, setLang] = useState(defaultLocale);
+  const [localLang, setLang] = useState(defaultLocale);
+  const lang = desktop?.lang ?? localLang;
   const [page, setPage] = useState<Page>('catalog');
   const [revision, setRevision] = useState(0);
-  const [scan, setScan] = useState<{ complete: boolean; diagnostics: unknown[] }>();
-  const [scanning, setScanning] = useState(false);
+  const [browserScan, setScan] = useState<{ complete: boolean; diagnostics: unknown[] }>();
+  const [browserScanning, setScanning] = useState(false);
+  const scan = desktop?.scan?.result ?? browserScan;
+  const scanning = desktop
+    ? desktop.scan?.state === 'running' || desktop.scan?.state === 'cancelling'
+    : browserScanning;
   const [error, setError] = useState<unknown>();
   const [source, setSource] = useState<{ path: string; line?: number }>();
   const initial = useRef(false);
@@ -48,6 +55,7 @@ function Application() {
   const refresh = () => setRevision((value) => value + 1);
 
   async function updateLocale(locale: Language) {
+    if (desktop) return desktop.setLocale(locale);
     setError(undefined);
     setLang(locale);
     try {
@@ -60,6 +68,7 @@ function Application() {
   }
 
   async function scanProject() {
+    if (desktop) return desktop.startScan();
     if (scanningNow.current) return;
     scanningNow.current = true;
     setScanning(true);
@@ -76,7 +85,7 @@ function Application() {
   }
 
   useEffect(() => {
-    if (!project.data) return;
+    if (desktop || !project.data) return;
     if (project.data.locale) setLang(project.data.locale);
     if (!initial.current) {
       initial.current = true;
@@ -85,13 +94,24 @@ function Application() {
   }, [project.data]);
 
   useEffect(() => {
+    if (desktop && !desktop.visible) return;
     document.documentElement.lang = lang;
     document.title = t('brand');
-  }, [lang]);
+  }, [lang, desktop?.visible]);
+
+  useEffect(() => {
+    if (desktop?.scan?.state === 'complete') refresh();
+  }, [desktop?.scan?.id, desktop?.scan?.state]);
+
+  useEffect(() => {
+    if (desktop && !desktop.visible) setSource(undefined);
+  }, [desktop?.visible]);
 
   const context = {
     lang,
     t,
+    command,
+    projectId: desktop?.project,
     project: project.data ?? { root: '', data: '', branch: '' },
     revision,
     refresh,
@@ -117,51 +137,64 @@ function Application() {
     >
       <Workspace.Provider value={context}>
         <Layout className="shell">
-          <Layout.Header className="top">
-            <div className="brand">
-              <span className="mark" aria-hidden="true">
-                {'{ }'}
-              </span>
-              {t('brand')}
+          {desktop ? (
+            <div className="project-bar">
+              <div className="project-title">
+                <strong>{desktop.name}</strong>
+                {project.data?.branch && <Tag>{project.data.branch}</Tag>}
+                <div className="project-path" title={project.data?.root}>
+                  {project.data?.root}
+                </div>
+              </div>
+              {desktop.scanControl(() => setPage('catalog'))}
             </div>
-            <div className="project">
-              <span className="project-path" title={project.data?.root}>
-                {project.data?.root}
-              </span>
-              {project.data?.branch && <Tag>{project.data.branch}</Tag>}
-              <span>
-                {scanning
-                  ? t('scanning')
-                  : project.data?.snapshot
-                    ? t('snapshot', { id: project.data.snapshot.slice(0, 8) })
-                    : t('notScanned')}
-              </span>
-            </div>
-            <Space>
-              <Button type="primary" loading={scanning} onClick={() => void scanProject()}>
-                {t('scan')}
-              </Button>
-              <Space.Compact role="group" aria-label={t('language')}>
-                {(
-                  [
-                    ['zh-CN', '简体中文'],
-                    ['en', 'English'],
-                  ] as const
-                ).map(([locale, label]) => (
-                  <Button
-                    key={locale}
-                    type={lang === locale ? 'primary' : 'default'}
-                    aria-pressed={lang === locale}
-                    onClick={() => {
-                      if (lang !== locale) void updateLocale(locale);
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </Space.Compact>
-            </Space>
-          </Layout.Header>
+          ) : (
+            <Layout.Header className="top">
+              <div className="brand">
+                <span className="mark" aria-hidden="true">
+                  {'{ }'}
+                </span>
+                {t('brand')}
+              </div>
+              <div className="project">
+                <span className="project-path" title={project.data?.root}>
+                  {project.data?.root}
+                </span>
+                {project.data?.branch && <Tag>{project.data.branch}</Tag>}
+                <span>
+                  {scanning
+                    ? t('scanning')
+                    : project.data?.snapshot
+                      ? t('snapshot', { id: project.data.snapshot.slice(0, 8) })
+                      : t('notScanned')}
+                </span>
+              </div>
+              <Space>
+                <Button type="primary" loading={scanning} onClick={() => void scanProject()}>
+                  {t('scan')}
+                </Button>
+                <Space.Compact role="group" aria-label={t('language')}>
+                  {(
+                    [
+                      ['zh-CN', '简体中文'],
+                      ['en', 'English'],
+                    ] as const
+                  ).map(([locale, label]) => (
+                    <Button
+                      key={locale}
+                      type={lang === locale ? 'primary' : 'default'}
+                      aria-pressed={lang === locale}
+                      onClick={() => {
+                        if (lang !== locale) void updateLocale(locale);
+                      }}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </Space.Compact>
+              </Space>
+            </Layout.Header>
+          )}
           <Layout hasSider>
             <Layout.Sider width={170} className="side">
               <Menu
@@ -174,6 +207,7 @@ function Application() {
             <Layout.Content className="main">
               <Select
                 className="mobile-nav"
+                virtual={false}
                 aria-label={t('select')}
                 value={page}
                 onChange={setPage}
@@ -238,7 +272,5 @@ function Application() {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <AntApp>
-    <Application />
-  </AntApp>,
+  <AntApp>{window.ifaceforge ? <DesktopApplication WorkspaceView={Application} /> : <Application />}</AntApp>,
 );

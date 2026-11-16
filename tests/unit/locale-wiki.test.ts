@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveProject } from '../../src/app/project.js';
+import { locateProject, projectPaths } from '../../src/app/project.js';
 import { scanProject } from '../../src/app/catalog.js';
 import { openProjectDatabase } from '../../src/storage/database.js';
 import { Repository } from '../../src/storage/repository.js';
@@ -27,7 +27,7 @@ it('merges notes, preserves unowned documents and restores the database and note
   execFileSync('git', ['init', '-q', root]);
   mkdirSync(join(root, 'read'));
   writeFileSync(join(root, 'read', 'SKILL.md'), '---\nname: read\ndescription: Read\n---\n# Body');
-  const project = resolveProject(root);
+  const project = projectPaths(locateProject(root), join(root, '.test-data'));
   const db = openProjectDatabase(project);
   const repository = new Repository(db);
   try {

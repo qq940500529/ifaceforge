@@ -4,7 +4,7 @@ import type { Run, Case, Suite, Versioned } from '../app/runs.js';
 import type { Settings } from '../app/config.js';
 import type { Snapshot } from '../scanner/model.js';
 import type { Profile } from '../protocols/variables.js';
-import { command, download, WebError } from './client.js';
+import { download, unwrap, WebError } from './client.js';
 import {
   Code,
   EmptyView,
@@ -37,7 +37,7 @@ const sampleCase = {
 const sampleSuite = { schemaVersion: 1, id: '', name: '', caseIds: [] };
 
 export function TestPage() {
-  const { t, revision, refresh, notify } = useWorkspace();
+  const { t, revision, refresh, notify, command } = useWorkspace();
   const cases = useLoad(() => command<Listed<Versioned<Case>>>('case list', { limit: 500 }), [revision]);
   const suites = useLoad(() => command<Listed<Versioned<Suite>>>('suite list', { limit: 500 }), [revision]);
   const runs = useLoad(() => command<Listed<Run>>('run list', { limit: 100 }), [revision]);
@@ -259,8 +259,9 @@ type WikiPreview = {
 };
 type WikiExport = { id: string; out: string; locale: string; snapshot: string };
 export function WikiPage() {
-  const { t, lang, revision, refresh, notify } = useWorkspace();
+  const { t, lang, revision, refresh, notify, command, projectId } = useWorkspace();
   const [out, setOut] = useState('');
+  const [fileToken, setFileToken] = useState<string>();
   const [snapshot, setSnapshot] = useState<string>();
   const [page, setPage] = useState('README.md');
   const [preview, setPreview] = useState<WikiPreview>();
@@ -295,7 +296,7 @@ export function WikiPage() {
       setBusy(false);
     }
   }
-  const parameters = () => ({ snapshot, out: out || undefined, lang });
+  const parameters = () => ({ snapshot, out: out || undefined, lang, fileToken });
   const load = async () => setPreview(await command('wiki preview', parameters()));
   return (
     <div className="stack">
@@ -318,8 +319,36 @@ export function WikiPage() {
             className="grow"
             value={out}
             placeholder={t('defaultOutput')}
+            readOnly={!!projectId}
             onChange={(event) => setOut(event.target.value)}
           />
+          {projectId && window.ifaceforge && (
+            <>
+              <Button
+                onClick={() =>
+                  void operation(async () => {
+                    const picked = await unwrap(window.ifaceforge!.chooseFile(projectId, 'wiki'));
+                    if (picked) {
+                      setOut(picked.path);
+                      setFileToken(picked.token);
+                    }
+                  })
+                }
+              >
+                {lang === 'zh-CN' ? '选择目录' : 'Choose folder'}
+              </Button>
+              {fileToken && (
+                <Button
+                  onClick={() => {
+                    setOut('');
+                    setFileToken(undefined);
+                  }}
+                >
+                  {t('defaultOutput')}
+                </Button>
+              )}
+            </>
+          )}
           <Button loading={busy} onClick={() => void operation(load)}>
             {t('preview')}
           </Button>
@@ -385,7 +414,7 @@ export function WikiPage() {
               choose={(entry) => {
                 setExport(entry);
                 setSnapshot(entry.snapshot);
-                setOut(entry.out);
+                if (!projectId) setOut(entry.out);
                 void operation(async () => {
                   setPreview(
                     await command('wiki preview', {
@@ -452,7 +481,7 @@ const sampleProfile = {
   variables: {},
 };
 export function SettingsPage() {
-  const { t, lang, project, revision, refresh, notify } = useWorkspace();
+  const { t, lang, project, revision, refresh, notify, command, projectId } = useWorkspace();
   const config = useLoad(
     () => command<{ settings: Settings; scan: Record<string, unknown>; source: string }>('config show'),
     [revision],
@@ -462,6 +491,8 @@ export function SettingsPage() {
   const [profile, setProfile] = useState(json(sampleProfile));
   const [profileId, setProfileId] = useState('');
   const [path, setPath] = useState('');
+  const [restoreFile, setRestoreFile] = useState<{ path: string; token: string }>();
+  const desktop = projectId ? window.ifaceforge : undefined;
   const [date, setDate] = useState('');
   const [preview, setPreview] = useState<{ ids: string[]; applied: boolean }>();
   const [confirm, setConfirm] = useState<'restore' | 'remove' | 'prune'>();
@@ -541,14 +572,42 @@ export function SettingsPage() {
           </Card>
           <Card size="small" title={t('maintenance')}>
             <div className="stack">
-              <Field label={t('backupPath')}>
-                <Input value={path} onChange={(event) => setPath(event.target.value)} />
-              </Field>
+              {!desktop && (
+                <Field label={t('backupPath')}>
+                  <Input value={path} onChange={(event) => setPath(event.target.value)} />
+                </Field>
+              )}
               <Space wrap>
-                <Button loading={busy} onClick={() => void operation(() => command('data backup', { out: path }))}>
+                <Button
+                  loading={busy}
+                  onClick={() =>
+                    void operation(async () => {
+                      const picked = desktop ? await unwrap(desktop.chooseFile(projectId!, 'backup')) : undefined;
+                      if (desktop && !picked) return;
+                      return command('data backup', { out: path, fileToken: picked?.token });
+                    })
+                  }
+                >
                   {t('backup')}
                 </Button>
-                <Button onClick={() => setConfirm('restore')}>{t('restore')}</Button>
+                <Button
+                  onClick={() =>
+                    void (async () => {
+                      try {
+                        const picked = desktop
+                          ? await unwrap(desktop.chooseFile(projectId!, 'restore'))
+                          : undefined;
+                        if (desktop && !picked) return;
+                        setRestoreFile(picked ?? undefined);
+                        setConfirm('restore');
+                      } catch (error) {
+                        setError(error);
+                      }
+                    })()
+                  }
+                >
+                  {t('restore')}
+                </Button>
               </Space>
               <Field label={t('cutoff')}>
                 <Input
@@ -614,7 +673,8 @@ export function SettingsPage() {
         onCancel={() => setConfirm(undefined)}
         onOk={() =>
           void operation(async () => {
-            if (confirm === 'restore') await command('data restore', { file: path, replace: true });
+            if (confirm === 'restore')
+              await command('data restore', { file: path, fileToken: restoreFile?.token, replace: true });
             else if (confirm === 'prune') await prune(true);
             else if (confirm === 'remove') {
               await command('profile remove', { id: profileId });
@@ -624,7 +684,11 @@ export function SettingsPage() {
           })
         }
       >
-        {confirm === 'restore' ? path : confirm === 'prune' ? preview?.ids.length : profileId}
+        {confirm === 'restore'
+          ? (restoreFile?.path ?? path)
+          : confirm === 'prune'
+            ? preview?.ids.length
+            : profileId}
       </Modal>
     </div>
   );

@@ -1,53 +1,45 @@
-# 0.1.0 release record
+# Build and release
 
-## Acceptance on Windows
+[用户手册](workbench.md) · [开发规格](development-spec.md) · [验证工作流](https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml) · [发行下载](https://github.com/qq940500529/ifaceforge/releases)
 
-Verified on 2026-11-16 (Hong Kong time), Windows 11 Pro x64 build 26200. Node 26.13.1 and Node 24.22.3 each passed 11 unit tests and 8 real integration tests. The three Chromium 159.0.8154.6 browser tests passed on Node 26. Rechecks covered the changed MCP paths and the tool form.
+## Build on the target system
 
-| Checks   | Windows evidence                                                                                                                                                                                                                                   |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A01, A12 | Clean lockfile install and build. Start, status, explicit port conflict, stop and archive startup against working trees with spaces and Chinese characters. The fixture's tracked source files remain intact.                                      |
-| A02, A11 | Independent project databases, backup and restore, optimistic version checks, and shared UI and CLI records. A restored case runs against the original fixture.                                                                                    |
-| A03, A07 | Express and FastAPI source and contract evidence, a live import of the dynamic Express route, incomplete scan retention, bilingual skill search, missing references, and source reads.                                                             |
-| A04      | Real 200 and expected 404 responses with passing schema assertions, and a deliberately failing case with the actual status retained.                                                                                                               |
-| A05, A06 | Both stdio and Streamable HTTP negotiated 2025-11-25 and 2026-07-28. The stdio batch reused a child and reaped it. Tests covered pagination, a resource, a prompt, a tool error and cancellation with an unknown result under the original run ID. |
-| A08, A09 | English and Simplified Chinese browser flows, persisted language selection, Wiki output, manual notes and protection of pre-existing files in export directories.                                                                                  |
-| A10      | CLI-only scans, requests, cases, reports and exports, schema discovery, JSON on standard output and nonzero assertion and cancellation exit codes.                                                                                                 |
-
-The local console reports are under `.devtools/ifaceforge/evidence/`. The public verification workflow covers Windows, macOS arm64 and Linux x64. Consult the workflow results for platforms beyond this Windows session.
-
-## Runtime and dependency selection
-
-Node.js 26.13.1 (Lithium) is the primary runtime. Node.js 24.22.3 (Krypton) is the compatibility baseline for v1.1. Both include SQLite 3.54.1. The Windows development run used npm 12.2.2 and Git for Windows 2.56.1.windows.1 in project local directories. The application itself requires Node.js and Git. [Official Node.js release index](https://nodejs.org/dist/index.json)
-
-The npm lockfile records the exact stable versions in the build. Main components include TypeScript 7.0.2, Vite 8.3.8, React 19.3.1, Ant Design 6.7.1, Express 5.3.0 and MCP TypeScript SDK 2.4.0. Type declarations stay on the Node 24 line to keep the compatibility baseline enforceable. ESLint checks executable JavaScript and TypeScript is checked by its compiler. The TypeScript ESLint parser currently requires TypeScript below 6.1. The FastAPI fixture uses FastAPI 0.163.1 and Uvicorn 0.54.0.
-
-## Reproduce
+Use Git and Node.js 26 LTS. Node.js 24 LTS remains a CLI and development compatibility target. Desktop builds use the Electron stable line specified in the lockfile and include their runtime. [Node.js support schedule](https://nodejs.org/en/about/previous-releases) · [Electron support schedule](https://www.electronjs.org/docs/latest/tutorial/electron-timelines)
 
 ```sh
 npm ci
-npm run check
 npm run build
+npm start
+npm run package -- --config.electronDist=node_modules/electron/dist
+```
+
+Build output is written to `artifacts/desktop`. Windows produces an NSIS installer, Apple Silicon macOS a DMG, and Linux x64 AppImage, DEB and RPM packages. Build on the same OS and architecture as the target. The optional CLI archive is built with `npm run package:cli`, and source installs can use `npm link`.
+
+## Verify
+
+```sh
+npm run check
 npm run test:unit
 npm run test:integration
 npx playwright install chromium
 npm run test:e2e
-npm run package
-node scripts/check-package.mjs release/ifaceforge-0.1.0.tar.gz
+npm run test:desktop
 ```
 
-Set `IFG_TEST_PYTHON` to a Python executable with the dependencies in `fixtures/fastapi/requirements.txt` installed to include the live FastAPI test. The verification workflow runs it on each runner. Playwright writes an HTML report to `playwright-report/` and retains failure traces in `test-results/`.
+For the live FastAPI case, install `fixtures/fastapi/requirements.txt` with a supported Python and set `IFG_TEST_PYTHON` to its executable. For a Linux desktop runner, use `xvfb-run -a npm run test:desktop`. Set `IFG_DESKTOP_EXE` to the packaged program to verify the shipped executable. Desktop screenshots and the test report appear in `test-results` and `playwright-desktop-report`.
 
-Test projects contain synthetic data and use names with spaces and Chinese characters. Run tests in the source checkout. The package check extracts the archive to a temporary directory and runs its own bundled application against a new Git working tree. Use `SHA256SUMS.txt` from the release to check the downloaded archive.
+Use synthetic projects, two separate worktrees, a custom install directory, and a fresh app data directory. Verify project isolation, scan cancellation and status, source and Wiki bounds, transport execution, visual layouts, and Windows install and uninstall. Check unit, integration and UI results for each release before publishing the corresponding assets. Refer to the release notes for the systems, architectures and scenarios actually tested.
 
-## Static discovery
+## Publish a preview
 
-Express recognizes single line method calls with literal route strings, including colon path parameters. FastAPI recognizes single line decorators with literal route paths. The MCP TypeScript adapter recognizes single line `tool` and `registerTool` calls with literal names. Dynamic registrations and composed routers can be examined from their runtime inventory. Source observations retain project relative file names and lines. The Express and FastAPI fixtures show standalone project configurations. File references in OpenAPI resolve inside the active working tree.
+1. Submit the changes through a pull request. Review build results, cross-platform checks, dependency review and the desktop test artifacts. Verify that public changes and logs contain synthetic project content.
+2. Create a version tag at the reviewed commit. Download the tested packages and dependency inventories. Compute SHA-256 over each delivered package and attach the checksum file to the release.
+3. Publish a prerelease with installation steps, verification scope, changes and known issues. Verify the tag and the actual assets from the release page.
+
+The previous technical preview and its acceptance record remain available in the [v0.1.0 tag](https://github.com/qq940500529/ifaceforge/tree/v0.1.0).
 
 ## Name review
 
-On 2026-11-16 (Hong Kong time), the GitHub public repository search for `ifaceforge` returned no matching repository before publication. npm returned 404 for both `ifaceforge` and `iface-forge`. Public web searches did not identify a same-name competing API and MCP workbench. [GitHub search](https://github.com/search?q=ifaceforge&type=repositories)
+The initial public repository, npm and web checks on 2026-11-16 found no established same-name API and MCP workbench. Formal trademark clearance remains incomplete. [Initial review record](https://github.com/qq940500529/ifaceforge/blob/v0.1.0/docs/release.md#name-review)
 
-Formal trademark review is incomplete. WIPO returned a verification challenge, the China National Intellectual Property Administration endpoint returned HTTP 403, and this review obtained no verifiable search record from the Hong Kong or United States databases. IfaceForge and 接口工坊 are provisional project names. The MIT license applies to the code. [WIPO](https://branddb.wipo.int/) · [CNIPA](https://sbj.cnipa.gov.cn/sbj/sbcx/) · [Hong Kong IPD](https://www.ipd.gov.hk/en/online-services/online-search/index.html) · [USPTO](https://tmsearch.uspto.gov/)
-
-MIT · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司.
+[MIT](../LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司

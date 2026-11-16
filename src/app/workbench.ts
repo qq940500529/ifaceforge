@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { AppError, invalid } from './errors.js';
 import { safeProfile } from './profiles.js';
 import { apiFragment, importApi, requestDraft, type Assertion } from './api.js';
@@ -6,7 +5,7 @@ import { activeSnapshot, diffScans, getEntity, page, scanProject, searchCatalog 
 import { checkConfig, effectiveConfig, type Locale } from './config.js';
 import { sourceText, projectFile } from './files.js';
 import { backupData, pruneData, restoreData } from './maintenance.js';
-import type { ProjectPaths } from './project.js';
+import { git, type ProjectPaths } from './project.js';
 import {
   recoverRun,
   removeCase,
@@ -25,7 +24,6 @@ import type { Kind, Snapshot } from '../scanner/model.js';
 import { curl, prepareHttp, type HttpRequest } from '../protocols/http.js';
 import type { McpAction } from '../protocols/mcp.js';
 import { Bindings, secretHeader, secretName, type Profile } from '../protocols/variables.js';
-import { getInstance, instanceResult, openLocation, startInstance, stopInstance } from '../server/instance.js';
 
 export interface CommandInput {
   id?: string;
@@ -49,7 +47,7 @@ export interface CommandInput {
   before?: string;
   case?: string;
   suite?: string;
-  port?: number;
+  fileToken?: string;
   limit?: number;
   offset?: number;
   version?: number;
@@ -61,7 +59,6 @@ export interface CommandInput {
   full?: boolean;
   includeUntracked?: boolean;
   requireComplete?: boolean;
-  noOpen?: boolean;
 }
 
 function need(value: string | undefined, name: string) {
@@ -93,26 +90,17 @@ export class Workbench {
       return wait ? run.finished : run.run;
     };
     switch (command) {
-      case 'start':
-        return startInstance(project, input.port, input.noOpen);
-      case 'stop':
-        return stopInstance(project);
       case 'status':
         return {
           project: project.root,
           database: project.database,
           dataDir: project.data,
           databaseSchema: repository.db.prepare('PRAGMA user_version').get()?.user_version,
-          ...instanceResult(await getInstance(project)),
         };
       case 'project': {
         let branch = '';
         try {
-          branch = execFileSync('git', ['branch', '--show-current'], {
-            cwd: project.root,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-          }).trim();
+          branch = git(project.root, ['branch', '--show-current']).trim();
         } catch {
           /* Detached or unavailable Git information. */
         }
@@ -265,11 +253,8 @@ export class Workbench {
       }
       case 'wiki note-show':
         return getNote(project, id());
-      case 'wiki open': {
-        const record = readWiki(repository, id());
-        openLocation(record.out);
-        return record;
-      }
+      case 'wiki open':
+        return readWiki(repository, id());
       case 'data backup':
         return backupData(project, repository, need(input.out, 'output path'));
       case 'data restore':

@@ -37,9 +37,9 @@ function records(type: 'case' | 'suite') {
 }
 
 export const commands: Usage[] = [
-  command('start', '--no-open', ['port', 'no-open', 'foreground'], true),
+  command('project list'),
+  command('project add', '<directory>', [], true, 'id'),
   command('status'),
-  command('stop', '', [], true),
   command('config show'),
   command('config validate', '--file .ifaceforge.json', ['file']),
   command('config apply', '--file settings.json', ['file'], true),
@@ -93,8 +93,6 @@ export const booleanOptions = new Set([
   'json',
   'help',
   'version',
-  'foreground',
-  'no-open',
   'full',
   'include-untracked',
   'require-complete',
@@ -102,9 +100,9 @@ export const booleanOptions = new Set([
   'apply',
 ]);
 export const globalOptions = ['project', 'json', 'help'];
-export const webCommands = new Set([
+export const commandNames = new Set([
   ...commands
-    .filter((item) => !['start', 'stop', 'commands', 'schema'].includes(item.name))
+    .filter((item) => !['project list', 'project add', 'commands', 'schema'].includes(item.name))
     .map((item) => item.name),
   'project',
   'mcp connect',

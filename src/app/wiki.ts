@@ -48,12 +48,12 @@ function readText(path: string): string {
 }
 
 function noteDirectory(project: ProjectPaths) {
-  return projectFile(project.root, relative(project.root, join(project.data, 'wiki-notes')), false);
+  return projectFile(project.data, 'wiki-notes', false);
 }
 
 function notePath(project: ProjectPaths, id: string) {
   if (!id || id.length > 1024) invalid('Invalid capability ID');
-  return projectFile(project.root, relative(project.root, join(noteDirectory(project), noteName(id))), false);
+  return projectFile(project.data, join('wiki-notes', noteName(id)), false);
 }
 
 export function putNote(project: ProjectPaths, id: string, text: string) {
@@ -188,7 +188,7 @@ export function buildWiki(project: ProjectPaths, repository: Repository, options
   if (preview.conflicts.length)
     throw new AppError('WIKI_CONFLICT', 'Output contains an unowned or edited file', 3, preview.conflicts);
   const out = preview.out;
-  if (!options.out) projectFile(project.root, relative(project.root, out), false);
+  if (!options.out) projectFile(project.data, relative(project.data, out), false);
   mkdirSync(dirname(out), { recursive: true });
   const stage = mkdtempSync(join(dirname(out), '.ifg-wiki-'));
   try {

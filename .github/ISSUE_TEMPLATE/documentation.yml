@@ -1,0 +1,13 @@
+name: Documentation issue
+description: Report missing, unclear, or outdated guidance
+body:
+  - type: input
+    attributes:
+      label: Document or page
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What needs to change?
+    validations:
+      required: true
