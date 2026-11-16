@@ -43,7 +43,10 @@ jobs:
       - run: npm run build
       - run: npm run test:unit
       - run: npm run test:integration
-      - run: npx playwright install --with-deps chromium
+      - if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - if: runner.os != 'Linux'
+        run: npx playwright install chromium
       - run: npm run test:e2e
       - run: npm run package
       - run: node scripts/check-package.mjs release/ifaceforge-0.1.0.tar.gz
