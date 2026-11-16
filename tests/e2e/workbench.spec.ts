@@ -26,7 +26,14 @@ for (const language of ['en', 'zh-CN'] as const) {
         await page.goto(url);
         await expect(page.getByRole('heading', { name: label('Catalog', '目录') })).toBeVisible();
         await page.getByRole('button', { name: label('Scan project', '扫描项目') }).click();
-        await expect(page.getByRole('button', { name: /GET \/tasks\/\{id\}/ }).first()).toBeVisible();
+        const route = page.getByRole('button', { name: /GET \/tasks\/\{id\}/ }).first();
+        await expect(route).toBeVisible();
+        const tags = route.locator('.catalog-labels');
+        await expect(tags.locator('.catalog-kind')).toHaveText('HTTP API');
+        await expect(tags.getByText(label('Declaration', '声明'), { exact: true })).toBeVisible();
+        await expect(tags.getByText(label('Source', '源码'), { exact: true })).toBeVisible();
+        await route.click();
+        await expect(page.getByRole('tab', { name: label('Sources', '来源'), exact: true })).toBeVisible();
         await page.getByRole('menuitem', { name: 'HTTP API', exact: true }).click();
         await page.getByRole('button', { name: label('New request', '新建请求') }).click();
         await page

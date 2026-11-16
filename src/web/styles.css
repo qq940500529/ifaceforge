@@ -117,6 +117,43 @@ body {
 .list-button .ant-tag {
   margin-top: 4px;
 }
+.catalog-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 6px;
+}
+.catalog-label {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid var(--label-border, #d9e1ec);
+  border-radius: 4px;
+  background: var(--label-background, #f6f8fb);
+  color: var(--label-color, #445872);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+.catalog-kind {
+  font-weight: 650;
+}
+.catalog-kind[data-kind='api'] {
+  --label-border: #c5d8f6;
+  --label-background: #eaf2ff;
+  --label-color: #224c91;
+}
+.catalog-kind[data-kind='mcp'] {
+  --label-border: #dacbf3;
+  --label-background: #f1eafa;
+  --label-color: #593482;
+}
+.catalog-kind[data-kind='skill'] {
+  --label-border: #bdddce;
+  --label-background: #e8f5ef;
+  --label-color: #245b47;
+}
 pre.code {
   margin: 0;
   overflow: auto;

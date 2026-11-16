@@ -134,6 +134,19 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
         }));
         expect(layout.content, width + ' px ' + tab).toBeLessThanOrEqual(layout.viewport);
         expect(layout.buttons, width + ' px ' + tab).toBe(true);
+        if (tab === 'Catalog') {
+          const badges = page.locator('.catalog-labels:visible').first();
+          await expect(badges.locator('.catalog-kind')).toBeVisible();
+          const separated = await badges.evaluate((row) => {
+            const container = row.getBoundingClientRect();
+            const items = Array.from(row.children, (child) => child.getBoundingClientRect());
+            return items.every((item, index) => {
+              const next = items[index + 1];
+              return item.right <= container.right && (!next || next.left > item.right || next.top > item.bottom);
+            });
+          });
+          expect(separated, width + ' px catalog labels').toBe(true);
+        }
         if (width === 600 || tab === 'HTTP API') {
           await page.screenshot({
             path: info.outputPath(width + '-' + tab.replaceAll(' ', '-') + '.png'),
