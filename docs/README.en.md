@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/qq940500529/ifaceforge/main/build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge</h1>
   <p><strong>A desktop interface and testing workbench for local Git projects</strong></p>
-  <p><a href="https://github.com/qq940500529/ifaceforge/releases">Download</a> · <a href="https://qq940500529.github.io/ifaceforge/README.en.html">Documentation</a> · <a href="https://qq940500529.github.io/ifaceforge/">简体中文</a> · <a href="cli.md">CLI reference</a></p>
+  <p><a href="https://github.com/qq940500529/ifaceforge/releases">Download</a> · <a href="https://qq940500529.github.io/ifaceforge/mcp.html">MCP guide</a> · <a href="https://qq940500529.github.io/ifaceforge/">简体中文</a> · <a href="https://qq940500529.github.io/ifaceforge/cli.html">CLI reference</a></p>
 </div>
 
 ![The IfaceForge MCP workbench with a service directory and a test with assertions](assets/mcp-workbench.png)
@@ -21,15 +21,10 @@ Use **Save as case** to replay a check through the Tests page or the CLI. Save c
 
 <details>
 <summary>Build from source</summary>
-
-```sh
-npm ci
+<pre><code>npm ci
 npm run build
-npm start
-```
-
-See the [release guide](release.md) for the desktop packaging and validation commands.
-
+npm start</code></pre>
+<p>See the <a href="https://qq940500529.github.io/ifaceforge/release.html">release guide</a> for desktop packaging and validation commands.</p>
 </details>
 
 [CLI reference](cli.md) · [Contributing](https://github.com/qq940500529/ifaceforge/blob/main/CONTRIBUTING.md) · [Discussions](https://github.com/qq940500529/ifaceforge/discussions) · [Report an issue](https://github.com/qq940500529/ifaceforge/issues/new/choose)
