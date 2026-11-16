@@ -678,7 +678,7 @@ export function SettingsPage() {
               selected={profileId}
               choose={chooseProfile}
             />
-            <JsonField label={t('document')} value={profile} change={setProfile} rows={10} />
+            <ProfileFields value={profile} change={setProfile} existing={!!profileId} />
             <Space wrap>
               <Button onClick={() => chooseProfile()}>{t('create')}</Button>
               <Button
@@ -725,6 +725,98 @@ export function SettingsPage() {
             ? preview?.ids.length
             : profileId}
       </Modal>
+    </div>
+  );
+}
+
+function ProfileFields({
+  value,
+  change,
+  existing,
+}: {
+  value: string;
+  change: (value: string) => void;
+  existing: boolean;
+}) {
+  const { t, lang } = useWorkspace();
+  const label = (en: string, zh: string) => (lang === 'zh-CN' ? zh : en);
+  let profile: Profile | undefined;
+  try {
+    const draft = parse(value) as Partial<Profile> | null;
+    if (draft && typeof draft.id === 'string' && typeof draft.name === 'string') profile = draft as Profile;
+  } catch {
+    // The JSON editor remains available for correcting invalid input.
+  }
+  const update = (fields: Partial<Profile>) => change(json({ ...profile, ...fields }));
+  const mcp = profile?.mcp;
+  return (
+    <div className="stack">
+      {profile && (
+        <>
+          <div className="toolbar">
+            <Field label={label('Profile ID', '环境 ID')}>
+              <Input
+                readOnly={existing}
+                value={profile.id}
+                onChange={(event) => update({ id: event.target.value })}
+              />
+            </Field>
+            <Field label={t('name')}>
+              <Input value={profile.name} onChange={(event) => update({ name: event.target.value })} />
+            </Field>
+          </div>
+          <Field label={label('HTTP base URL', 'HTTP 基础 URL')}>
+            <Input
+              value={profile.http?.baseUrl ?? ''}
+              onChange={(event) =>
+                update({
+                  http: { ...profile?.http, baseUrl: event.target.value || undefined },
+                })
+              }
+            />
+          </Field>
+          <Field label={label('MCP transport', 'MCP 传输方式')}>
+            <Select
+              aria-label={label('MCP transport', 'MCP 传输方式')}
+              value={mcp?.transport}
+              placeholder={label('Select transport', '选择传输方式')}
+              options={[
+                { value: 'stdio', label: 'stdio' },
+                { value: 'streamableHttp', label: 'Streamable HTTP' },
+              ]}
+              allowClear
+              virtual={false}
+              onChange={(transport: 'stdio' | 'streamableHttp' | undefined) =>
+                update({
+                  mcp:
+                    transport === 'stdio'
+                      ? { transport, command: '' }
+                      : transport === 'streamableHttp'
+                        ? { transport, url: '' }
+                        : undefined,
+                })
+              }
+            />
+          </Field>
+          {mcp?.transport === 'stdio' && (
+            <Field label={label('Executable', '可执行程序')}>
+              <Input
+                value={mcp.command}
+                onChange={(event) => update({ mcp: { ...mcp, command: event.target.value } })}
+              />
+            </Field>
+          )}
+          {mcp?.transport === 'streamableHttp' && (
+            <Field label={label('MCP URL', 'MCP 地址')}>
+              <Input value={mcp.url} onChange={(event) => update({ mcp: { ...mcp, url: event.target.value } })} />
+            </Field>
+          )}
+        </>
+      )}
+      <details open={profile ? undefined : true}>
+        <summary>{t('document')}</summary>
+        <JsonField label={t('document')} value={value} change={change} rows={10} />
+      </details>
     </div>
   );
 }

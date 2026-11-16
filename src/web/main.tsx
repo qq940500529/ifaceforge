@@ -117,7 +117,7 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
     refresh,
     setLocale: updateLocale,
     notify: (text: string) => {
-      void message.success(text);
+      void message.success({ key: 'workspace-feedback', content: text });
     },
     showSource: (path: string, line?: number) => setSource({ path, line }),
   };
@@ -272,5 +272,7 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <AntApp>{window.ifaceforge ? <DesktopApplication WorkspaceView={Application} /> : <Application />}</AntApp>,
+  <AntApp message={{ maxCount: 1, top: 84 }}>
+    {window.ifaceforge ? <DesktopApplication WorkspaceView={Application} /> : <Application />}
+  </AntApp>,
 );

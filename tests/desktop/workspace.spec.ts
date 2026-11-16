@@ -355,6 +355,19 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
     await snapshot('local-settings');
+    await button('Create').click();
+    await page.getByRole('textbox', { name: 'Profile ID', exact: true }).fill('local-audit');
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Local profile audit');
+    await page.getByRole('textbox', { name: 'HTTP base URL', exact: true }).fill(origin);
+    await page.getByRole('combobox', { name: 'MCP transport' }).click();
+    await page.getByRole('option', { name: 'Streamable HTTP', exact: true }).click();
+    await page.getByRole('textbox', { name: 'MCP URL', exact: true }).fill(transport + '/mcp');
+    await button('Save').click();
+    await expect(button('Local profile audit')).toBeVisible();
+    expect(await page.locator('.ant-message-notice:visible').count()).toBeLessThanOrEqual(1);
+    await button('Remove').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
+    await expect(button('Local profile audit')).not.toBeVisible();
 
     await header.getByRole('button', { name: 'Manage projects' }).click();
     const manager = page.getByRole('dialog', { name: 'Manage projects' });
