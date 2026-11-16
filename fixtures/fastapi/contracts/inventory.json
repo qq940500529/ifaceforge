@@ -1,0 +1,13 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Synthetic inventory", "version": "1.0.0" },
+  "paths": {
+    "/inventory/{item_id}": {
+      "get": {
+        "summary": "Read inventory",
+        "parameters": [{ "name": "item_id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "Inventory read" } }
+      }
+    }
+  }
+}

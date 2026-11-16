@@ -1,0 +1,49 @@
+name: Verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            node: 26.13.1
+          - os: windows-latest
+            node: 24.22.3
+          - os: ubuntu-latest
+            node: 26.13.1
+          - os: macos-15
+            node: 26.13.1
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      IFG_TEST_PYTHON: python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: node -p "JSON.stringify({node:process.version,platform:process.platform,arch:process.arch,sqlite:process.versions.sqlite})"
+      - run: git --version
+      - run: npm ci
+      - run: python -m pip install -r fixtures/fastapi/requirements.txt
+      - run: npm run check
+      - run: npm run build
+      - run: npm run test:unit
+      - run: npm run test:integration
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run package
+      - run: node scripts/check-package.mjs release/ifaceforge-0.1.0.tar.gz

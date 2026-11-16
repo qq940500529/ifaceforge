@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: Synthetic task service
+  version: 1.0.0
+paths:
+  /tasks/{id}:
+    get:
+      summary: Read a task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Task found
+          content:
+            application/json:
+              schema:
+                $ref: './schemas.yml#/Task'
+        '404':
+          description: Task missing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { const: missing }

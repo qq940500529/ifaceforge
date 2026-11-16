@@ -1,0 +1,57 @@
+{
+  "name": "ifaceforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local workbench for repository APIs, MCP servers, and skills",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": "^24.22.3 || ^26.13.1"
+  },
+  "bin": {
+    "ifg": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && vite build",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "format": "prettier --write src tests fixtures scripts .github README.md CONTRIBUTING.md docs/cli.md docs/release.md *.config.* tsconfig*.json package.json",
+    "format:check": "prettier --check src tests fixtures scripts .github README.md CONTRIBUTING.md docs/cli.md docs/release.md *.config.* tsconfig*.json package.json",
+    "lint": "eslint fixtures scripts *.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@playwright/test": "1.65.1",
+    "@types/express": "5.0.6",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "antd": "6.7.1",
+    "eslint": "10.15.0",
+    "prettier": "3.10.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-markdown": "10.1.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0",
+    "zod": "4.6.7"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "express": "5.3.0",
+    "jsonc-parser": "3.3.1",
+    "minimatch": "11.0.8",
+    "yaml": "2.9.1"
+  },
+  "packageManager": "npm@12.2.2",
+  "author": "数链创元（天津）信息技术有限责任公司"
+}

@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "sample-stdio": { "command": "node", "args": ["mcp.mjs", "stdio"], "cwd": "." },
+    "sample-http": { "url": "http://127.0.0.1:4301/mcp" }
+  }
+}

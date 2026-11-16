@@ -1,0 +1,176 @@
+@import 'antd/dist/reset.css';
+
+:root {
+  font-family: Inter, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  color: #14223a;
+  background: #f3f6fb;
+}
+body {
+  margin: 0;
+}
+.shell {
+  min-height: 100vh;
+}
+.top {
+  background: #14233b;
+  color: #f4f7ff;
+  min-height: 66px;
+  height: auto;
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  line-height: normal;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 20px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.mark {
+  background: #3b78e7;
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: white;
+  font-family: monospace;
+  font-size: 17px;
+}
+.project {
+  color: #c7d5ee;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  font-family: 'Segoe UI', sans-serif;
+  gap: 10px;
+  min-width: 0;
+}
+.project-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side {
+  background: white !important;
+  border-right: 1px solid #e4eaf3;
+}
+.side .ant-menu {
+  padding: 14px 8px;
+}
+.main {
+  padding: 24px;
+  min-width: 0;
+  max-width: 1500px;
+  width: 100%;
+  margin: 0 auto;
+}
+.page-title {
+  margin-top: 0 !important;
+  margin-bottom: 20px !important;
+}
+.stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.split {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+}
+.split-even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.toolbar .grow {
+  flex: 1 1 210px;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.field > span {
+  font-weight: 500;
+}
+.list-button {
+  white-space: normal;
+  height: auto;
+  text-align: left;
+  width: 100%;
+  display: block;
+  padding: 9px 12px;
+  overflow-wrap: anywhere;
+}
+.list-button .ant-tag {
+  margin-top: 4px;
+}
+pre.code {
+  margin: 0;
+  overflow: auto;
+  max-height: 391px;
+  background: #f5f7fb;
+  padding: 12px;
+  border: 1px solid #e5eaf3;
+  border-radius: 8px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.markdown {
+  overflow-wrap: anywhere;
+}
+.markdown pre {
+  white-space: pre-wrap;
+  padding: 12px;
+  background: #f5f7fb;
+}
+.markdown a {
+  color: #315aae;
+}
+.order {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block: 6px;
+}
+.mobile-nav {
+  display: none;
+}
+@media (max-width: 840px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .main {
+    padding: 16px;
+  }
+  .top {
+    padding-inline: 14px;
+  }
+}
+@media (max-width: 620px) {
+  .side {
+    display: none;
+  }
+  .mobile-nav {
+    display: block;
+    margin-bottom: 14px;
+  }
+  .project {
+    display: none;
+  }
+}

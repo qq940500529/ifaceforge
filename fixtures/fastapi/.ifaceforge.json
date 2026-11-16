@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    { "id": "inventory", "roots": ["service"], "adapters": ["fastapi"], "openapi": ["contracts/inventory.json"] }
+  ]
+}
