@@ -2,7 +2,7 @@
 
 2026 年 11 月 16 日（香港时间） · Windows 本机
 
-使用现有 v0.1.0、Chromium、独立合成 Git 工作树和真实本机 HTTP/MCP 样例。每组从浏览器操作按钮、菜单、输入框、页签或展开控件，通过对应的页面结果、下载、剪贴板或命令响应核对结果。删除、备份恢复和清理只作用于合成项目。布局矩阵记录可见按钮的边界、同组换行和窗口横向滚动。截图位于本机 `.devtools/ifaceforge/desktop-audit/`，部分项目路径在截图中已遮盖。审计记录作为[桌面版实施方案](desktop-plan.md)的 UI 基线。
+使用现有 v0.1.0、Chromium、独立 Git 测试工作树和真实本机 HTTP/MCP 样例。每组从浏览器操作按钮、菜单、输入框、页签或展开控件，通过对应的页面结果、下载、剪贴板或命令响应核对结果。删除、备份恢复和清理只作用于测试项目。布局矩阵记录可见按钮的边界、同组换行和窗口横向滚动。截图位于本机 `.devtools/ifaceforge/desktop-audit/`，部分项目路径在截图中已遮盖。审计记录作为[桌面版实施方案](desktop-plan.md)的 UI 基线。
 
 ## 逐项操作结果
 
@@ -37,9 +37,9 @@
 
 ### 补充按钮与状态证据
 
-- 在 960 像素宽度执行了带自定义 Header 和 JSON 正文的真实 HTTP POST，确认服务收到并回送两者。随后用 stdio 连接合成 MCP 服务，发现并调用工具，再断开连接。Streamable HTTP 的分类操作见主流程。证据为 `http-post-headers-body.png`、`mcp-stdio-result.png`、`transports.json`。
+- 在 960 像素宽度执行了带自定义 Header 和 JSON 正文的真实 HTTP POST，确认服务收到并回送两者。随后用 stdio 连接MCP 测试服务，发现并调用工具，再断开连接。Streamable HTTP 的分类操作见主流程。证据为 `http-post-headers-body.png`、`mcp-stdio-result.png`、`transports.json`。
 
-- 目录搜索的提交图标和清除图标实际点击。分页使用 25 条额外合成路由操作了页码、上一页和下一页。证据为 `catalog-search-buttons.png`、`catalog-pagination.png`。
+- 目录搜索的提交图标和清除图标实际点击。分页使用 25 条额外测试路由操作了页码、上一页和下一页。证据为 `catalog-search-buttons.png`、`catalog-pagination.png`。
 - HTTP 超时输入框悬停时出现增减按钮。测试从 5000 加到 5001 再减回 5000。没有鼠标悬停时按钮不明显，桌面版应通过键盘可用性和视觉可发现性验收。证据为 `http-timeout-hover.png`、`stepper.json`。
 - Wiki 实际选择一个快照，展开并收起「变更页面、移除页面、冲突、未匹配说明」四组。证据为 `wiki-snapshot-and-details.png`、`narrow.json`。
 - 注入一次项目加载失败，展开错误详情，点击「重试」后回到可用目录。这是故障注入，不是样例项目的真实故障。证据为 `retry-error-expanded.png`。
@@ -55,7 +55,7 @@
 
 ## 桌面窗口回归
 
-桌面测试用 Electron 实际窗口和合成 Git 工作树验证目录、HTTP、MCP、技能、测试、Wiki 及本地设置。按 1440、1200、960、820、720、640、600 七档窗口宽度操作导航，检查全部页面的横向溢出和顶部按钮位置。关键操作保留截图，包括扫描浮窗、详情展开、编辑与发送、工具调用、Wiki 变更和本地设置。测试入口为 `npm run test:desktop`。
+桌面测试用 Electron 实际窗口和Git 测试工作树验证目录、HTTP、MCP、技能、测试、Wiki 及本地设置。按 1440、1200、960、820、720、640、600 七档窗口宽度操作导航，检查全部页面的横向溢出和顶部按钮位置。关键操作保留截图，包括扫描浮窗、详情展开、编辑与发送、工具调用、Wiki 变更和本地设置。测试入口为 `npm run test:desktop`。
 
 Windows 本机在自选中文目录安装应用，实际打开原生目录选择器并取消。安装版扫描期间检查窗口列表，24 次采样未发现新增控制台。扫描浮窗显示了项目名、读取阶段、进度、处理数、警告数和取消按钮。平台安装包的最终验证结果见相应发行和 GitHub Actions。
 

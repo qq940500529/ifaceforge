@@ -14,7 +14,7 @@ npm run build
 npm start
 ```
 
-Use a synthetic Git worktree when reproducing issues. Test desktop changes in a real app window. Include screenshots for visible UI changes, and exercise details, individual buttons, grouped actions and narrower windows.
+Use a Git test worktree when reproducing issues. Test desktop changes in a real app window. Include screenshots for visible UI changes, and exercise details, individual buttons, grouped actions and narrower windows.
 
 ```sh
 npm run check

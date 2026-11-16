@@ -11,7 +11,7 @@ body:
   - type: textarea
     attributes:
       label: Steps to reproduce
-      description: Use a synthetic project and omit credentials and private paths.
+      description: Use a test project and omit credentials and private paths.
     validations:
       required: true
   - type: textarea

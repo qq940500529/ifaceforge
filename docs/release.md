@@ -29,18 +29,14 @@ npm run test:desktop
 
 For the live FastAPI case, install `fixtures/fastapi/requirements.txt` with a supported Python and set `IFG_TEST_PYTHON` to its executable. For a Linux desktop runner, use `xvfb-run -a npm run test:desktop`. Set `IFG_DESKTOP_EXE` to the packaged program to verify the shipped executable. Desktop screenshots and the test report appear in `test-results` and `playwright-desktop-report`.
 
-Use synthetic projects, two separate worktrees, a custom install directory, and a fresh app data directory. Verify project isolation, scan cancellation and status, source and Wiki bounds, transport execution, visual layouts, and Windows install and uninstall. Check unit, integration and UI results for each release before publishing the corresponding assets. Refer to the release notes for the systems, architectures and scenarios actually tested.
+Use test projects, two separate worktrees, a custom install directory, and a fresh app data directory. Verify project isolation, scan cancellation and status, source and Wiki bounds, transport execution, visual layouts, and Windows install and uninstall. Check unit, integration and UI results for each release before publishing the corresponding assets. Refer to the release notes for the systems, architectures and scenarios actually tested.
 
 ## Publish a preview
 
-1. Submit the changes through a pull request. Review build results, cross-platform checks, dependency review and the desktop test artifacts. Verify that public changes and logs contain synthetic project content.
+1. Submit the changes through a pull request. Review build results, cross-platform checks, dependency review and the desktop test artifacts. Use test data in public changes and logs.
 2. Create a version tag at the reviewed commit. Download the tested packages and dependency inventories. Compute SHA-256 over each delivered package and attach the checksum file to the release.
 3. Publish a prerelease with installation steps, verification scope, changes and known issues. Verify the tag and the actual assets from the release page.
 
 The previous technical preview and its acceptance record remain available in the [v0.1.0 tag](https://github.com/qq940500529/ifaceforge/tree/v0.1.0).
-
-## Name review
-
-The initial public repository, npm and web checks on 2026-11-16 found no established same-name API and MCP workbench. Formal trademark clearance remains incomplete. [Initial review record](https://github.com/qq940500529/ifaceforge/blob/v0.1.0/docs/release.md#name-review)
 
 [MIT](https://github.com/qq940500529/ifaceforge/blob/main/LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司
