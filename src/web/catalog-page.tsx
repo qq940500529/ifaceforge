@@ -60,6 +60,11 @@ export function useCatalog(kind?: Kind) {
   };
 }
 
+function OriginLabel({ value }: { value: Observation['origin'] }) {
+  const { t } = useWorkspace();
+  return <span className="catalog-label catalog-origin">{t(value)}</span>;
+}
+
 export function CatalogList({
   list,
   expanded = false,
@@ -155,10 +160,12 @@ export function CatalogList({
                   {entity.service}
                   {entity.observations[0]?.path ? ' · ' + entity.observations[0].path : ''}
                 </div>
-                <div>
-                  <Label value={entity.kind} />
+                <div className="catalog-labels">
+                  <span className="catalog-label catalog-kind" data-kind={entity.kind}>
+                    {t(entity.kind)}
+                  </span>
                   {[...new Set(entity.observations.map((item) => item.origin))].map((origin) => (
-                    <Label key={origin} value={origin} />
+                    <OriginLabel key={origin} value={origin} />
                   ))}
                 </div>
               </div>
@@ -191,7 +198,7 @@ function Origins({ observations }: { observations: Observation[] }) {
       {observations.map((entry, index) => (
         <div key={index} className="stack">
           <Space wrap>
-            <Label value={entry.origin} />
+            <OriginLabel value={entry.origin} />
             {entry.profile}
             {entry.path && (
               <Typography.Text code>
