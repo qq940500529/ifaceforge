@@ -81,7 +81,7 @@ ifg mcp prompt task-summary --profile sample-stdio --args prompt-args.json --jso
 ifg mcp batch --profile sample-stdio --file sequence.json --json
 ```
 
-Echo parameters are `{"value":"example"}`. Template parameters are `{"id":42}`. Prompt parameters are `{"title":"Sample task"}`. Pass an optional JSON assertion array such as `[{"type":"textContains","pointer":"/contents/0/text","text":"Task"}]` to `--assertions` on any of these four actions. See the [MCP guide](mcp.md) for test details.
+Echo parameters are `{"value":"example"}`. Template parameters are `{"id":42}`. Prompt parameters are `{"title":"Sample task"}`. Pass an optional JSON assertion array such as `[{"type":"textContains","pointer":"/contents/0/text","text":"Task"}]` to `--assertions` on any of these four actions. See the [MCP guide](https://qq940500529.github.io/ifaceforge/mcp.html) for test details.
 
 A batch has `schemaVersion: 1` and named steps with type `discover`, `call`, `read`, `template` or `prompt`. Steps accept `assertions`. A step with `"extract":{"text":"/value"}` can supply `{{text}}` to a later step. Use batches or suites to reuse a connection.
 
