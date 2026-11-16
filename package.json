@@ -62,5 +62,8 @@
     "yaml": "2.9.1"
   },
   "packageManager": "npm@12.2.2",
-  "author": "数链创元（天津）信息技术有限责任公司"
+  "author": "数链创元（天津）信息技术有限责任公司",
+  "overrides": {
+    "minimatch@>=7.0.0 <11.0.1": "$minimatch"
+  }
 }
