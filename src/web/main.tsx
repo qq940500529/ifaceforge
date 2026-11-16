@@ -14,7 +14,7 @@ import {
 import enUS from 'antd/es/locale/en_US.js';
 import type { Locale as AntLocale } from 'antd/es/locale/index.js';
 import zhCN from 'antd/es/locale/zh_CN.js';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { command as browserCommand } from './client.js';
 import { CatalogPage } from './catalog-page.js';
@@ -25,13 +25,17 @@ import { Code, ErrorView, Loading, Workspace, useLoad, type Project } from './co
 import { translator, type Language } from './i18n.js';
 import './styles.css';
 import { DesktopApplication, type DesktopContext } from './desktop.js';
+import { useVersions, VersionBar, VersionPage } from './version-page.js';
+import { GuidePage } from './guide-page.js';
+import type { CommandInput } from '../app/workbench.js';
 
-const pages = ['catalog', 'api', 'mcp', 'skill', 'tests', 'wiki', 'settings'] as const;
+const pages = ['catalog', 'api', 'mcp', 'skill', 'versions', 'tests', 'wiki', 'guides', 'settings'] as const;
 type Page = (typeof pages)[number];
 const defaultLocale: Language = navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 
 export function Application({ desktop }: { desktop?: DesktopContext }) {
   const command = desktop?.command ?? browserCommand;
+  const versions = useVersions(command, !!desktop, desktop?.visible ?? false);
   const { message } = AntApp.useApp();
   const [localLang, setLang] = useState(defaultLocale);
   const lang = desktop?.lang ?? localLang;
@@ -40,6 +44,12 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
   function setPage(next: Page) {
     if (next === 'mcp') setMcpVisited(true);
     selectPage(next);
+    if (next === 'versions') versions.setVisibility(true);
+  }
+  function compareFromPage() {
+    if (page === 'api' || page === 'mcp' || page === 'skill') versions.setScope(page);
+    else if (page !== 'versions') versions.setScope('all');
+    setPage('versions');
   }
   const [revision, setRevision] = useState(0);
   const [browserScan, setScan] = useState<{ complete: boolean; diagnostics: unknown[] }>();
@@ -49,15 +59,30 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
     ? desktop.scan?.state === 'running' || desktop.scan?.state === 'cancelling'
     : browserScanning;
   const [error, setError] = useState<unknown>();
-  const [source, setSource] = useState<{ path: string; line?: number }>();
+  const [source, setSource] = useState<{ path: string; line?: number; ref?: string; snapshot?: string }>();
   const initial = useRef(false);
   const scanningNow = useRef(false);
   const project = useLoad(() => command<Project>('project'), [revision]);
   const sourceContent = useLoad(
-    () => (source ? command<{ text: string }>('source show', { path: source.path }) : Promise.resolve(undefined)),
-    [source?.path],
+    () => (source ? command<{ text: string }>('source show', source) : Promise.resolve(undefined)),
+    [source?.path, source?.ref, source?.snapshot],
   );
   const t = translator(lang);
+  const historicalSnapshot = versions.view?.snapshot;
+  useEffect(() => {
+    setRevision((value) => value + 1);
+  }, [historicalSnapshot]);
+  const scoped = useCallback(
+    <T,>(name: string, input: CommandInput = {}) => {
+      const historical =
+        historicalSnapshot && /^(?:catalog |skill |api (?:draft|export)$|wiki (?:preview|build)$)/.test(name);
+      return command<T>(
+        name,
+        historical && !input.snapshot && !input.ref ? { ...input, snapshot: historicalSnapshot } : input,
+      );
+    },
+    [command, historicalSnapshot],
+  );
   const refresh = () => setRevision((value) => value + 1);
 
   async function updateLocale(locale: Language) {
@@ -116,7 +141,7 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
   const context = {
     lang,
     t,
-    command,
+    command: scoped,
     projectId: desktop?.project,
     project: project.data ?? { root: '', data: '', branch: '' },
     revision,
@@ -125,7 +150,8 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
     notify: (text: string) => {
       void message.success({ key: 'workspace-feedback', content: text });
     },
-    showSource: (path: string, line?: number) => setSource({ path, line }),
+    showSource: (path: string, line?: number, ref?: string) =>
+      setSource({ path, line, ref, snapshot: ref ? undefined : historicalSnapshot }),
   };
   const links = pages.map((key) => ({ key, label: t(key) }));
   return (
@@ -201,6 +227,7 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
               </Space>
             </Layout.Header>
           )}
+          {project.data && <VersionBar state={versions} open={compareFromPage} />}
           <Layout hasSider>
             <Layout.Sider width={170} className="side">
               <Menu
@@ -247,12 +274,16 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
                   <CatalogPage key="catalog" />
                 ) : page === 'skill' ? (
                   <CatalogPage key="skill" kind="skill" />
+                ) : page === 'versions' ? (
+                  <VersionPage state={versions} />
                 ) : page === 'api' ? (
                   <ApiPage />
                 ) : page === 'mcp' ? null : page === 'tests' ? (
                   <TestPage />
                 ) : page === 'wiki' ? (
                   <WikiPage />
+                ) : page === 'guides' ? (
+                  <GuidePage snapshot={historicalSnapshot} />
                 ) : (
                   <SettingsPage />
                 )}

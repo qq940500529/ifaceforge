@@ -93,6 +93,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb rpm libgtk-3-0t64 libnss3 libgbm1 libasound2t64
       - run: npm run package -- --config.electronDist=node_modules/electron/dist
+      - name: Build and verify the independent CLI archive
+        shell: bash
+        env:
+          IFG_CLI_OUTPUT: artifacts/desktop
+        run: |
+          npm run package:cli
+          node scripts/check-package.mjs artifacts/desktop/ifaceforge-cli-*.tar.gz
       - name: Test the installed Windows app
         if: runner.os == 'Windows'
         shell: pwsh
@@ -142,6 +149,8 @@ jobs:
             artifacts/desktop/*.AppImage
             artifacts/desktop/*.deb
             artifacts/desktop/*.rpm
+            artifacts/desktop/ifaceforge-cli-*.tar.gz
+            artifacts/desktop/ifaceforge-cli-*.sha256
             artifacts/desktop/sbom-*.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

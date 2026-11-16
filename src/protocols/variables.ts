@@ -1,4 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { AppError, invalid } from '../app/errors.js';
+import type { mcpVersions } from './mcp-versions.js';
 
 export type Scalar = string | number | boolean | null;
 export type EnvRef = { env: string };
@@ -16,9 +18,10 @@ export interface HttpProfile {
     | { type: 'bearer'; token: EnvRef }
     | { type: 'apiKey'; name: string; key: EnvRef };
 }
-export type McpProfile =
+export type McpProfile = (
   | { transport: 'stdio'; command: string; args?: string[]; cwd?: string; env?: Record<string, EnvRef> }
-  | { transport: 'streamableHttp'; url: string; headers?: Pair[] };
+  | { transport: 'streamableHttp' | 'sse'; url: string; headers?: Pair[] }
+) & { protocolVersion?: (typeof mcpVersions)[number] };
 export interface Profile {
   schemaVersion: 1;
   id: string;
@@ -34,6 +37,21 @@ export const secretHeader =
   /^(?:authorization|proxy-authorization|cookie|set-cookie|.*[-_](?:token|secret|api[-_]key|apikey)|x-api-key|apikey|api-key)$/i;
 export const secretName = /(?:password|secret|token|auth|cookie|credential|api[_-]?key)/i;
 const mask = '[REDACTED]';
+export const bindingEnvironment = new AsyncLocalStorage<Record<string, string | null>>();
+
+export function referencedEnvironment(input: unknown) {
+  const names = new Set<string>();
+  const pending = [input];
+  while (pending.length) {
+    const entry = pending.pop();
+    if (envReference(entry)) names.add(entry.env);
+    else if (typeof entry === 'string') for (const item of entry.matchAll(token)) names.add(item[1]);
+    else if (entry && typeof entry === 'object') pending.push(...Object.values(entry));
+  }
+  return Object.fromEntries(
+    [...names].map((name) => [name, Object.hasOwn(process.env, name) ? (process.env[name] ?? null) : null]),
+  );
+}
 
 function envReference(value: unknown): value is EnvRef {
   return (
@@ -54,7 +72,13 @@ export class Bindings {
   }
 
   environment(name: string) {
-    const value = Object.hasOwn(process.env, name) ? process.env[name] : undefined;
+    const overrides = bindingEnvironment.getStore();
+    const value =
+      overrides && Object.hasOwn(overrides, name)
+        ? (overrides[name] ?? undefined)
+        : Object.hasOwn(process.env, name)
+          ? process.env[name]
+          : undefined;
     if (value === undefined)
       throw new AppError('MISSING_VARIABLE', 'Environment variable is missing', 3, { name });
     this.hide(value);

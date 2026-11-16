@@ -14,7 +14,7 @@ node node_modules/electron/install.js
 npm run package -- --config.electronDist=node_modules/electron/dist
 ```
 
-Build output is written to `artifacts/desktop`. Windows produces an NSIS installer, Apple Silicon macOS a DMG, and Linux x64 AppImage, DEB and RPM packages. Build on the same OS and architecture as the target. The optional CLI archive is built with `npm run package:cli`, and source installs can use `npm link`.
+Build output is written to `artifacts/desktop`. Windows produces an NSIS installer, Apple Silicon macOS a DMG, and Linux x64 AppImage, DEB and RPM packages. Build on the same OS and architecture as the target. `npm run package:cli` builds a platform-specific archive with `ifg`, its Node.js runtime and a SHA-256 checksum. Verify it with `node scripts/check-package.mjs <archive>`. Source installs can use `npm link`.
 
 ## Verify
 

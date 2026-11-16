@@ -38,7 +38,7 @@ import {
 
 const kinds = ['tool', 'resource', 'template', 'prompt'] as const;
 type Kind = (typeof kinds)[number];
-type Connection = Omit<Discovery, 'groups'> & { id: string };
+type Connection = Omit<Discovery, 'groups'> & { id: string; profile?: string };
 type Draft = { arguments: string; checks: AssertionDraft[] };
 type Entry = Record<string, unknown>;
 
@@ -257,7 +257,10 @@ export function McpPage() {
     setPhase('connecting');
     setError(undefined);
     try {
-      const value = await command<Connection>('mcp connect', { profile });
+      const sessions = await command<Connection[]>('mcp status');
+      const value =
+        sessions.find((session) => session.profile === profile) ??
+        (await command<Connection>('mcp connect', { profile }));
       setConnection(value);
       await refreshDirectory(value, profile);
     } catch (error) {
@@ -267,21 +270,41 @@ export function McpPage() {
     }
   }
 
+  function clearConnection() {
+    setConnection(undefined);
+    setInventory(undefined);
+    discovery.setRun(undefined);
+    execution.setRun(undefined);
+    setActiveKey(undefined);
+    setId(undefined);
+    setDrafts({});
+    setResults({});
+    setHistoryId(undefined);
+  }
+
+  useEffect(() => {
+    if (!connection || phase) return;
+    let mounted = true;
+    const timer = setInterval(() => {
+      void command<Connection[]>('mcp status')
+        .then((sessions) => {
+          if (mounted && !sessions.some((session) => session.id === connection.id)) clearConnection();
+        })
+        .catch(() => undefined);
+    }, 1500);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [connection, command, phase]);
+
   async function disconnect() {
     if (!connection) return;
     setPhase('disconnecting');
     setError(undefined);
     try {
       await command('mcp disconnect', { id: connection.id });
-      setConnection(undefined);
-      setInventory(undefined);
-      discovery.setRun(undefined);
-      execution.setRun(undefined);
-      setActiveKey(undefined);
-      setId(undefined);
-      setDrafts({});
-      setResults({});
-      setHistoryId(undefined);
+      clearConnection();
     } catch (error) {
       setError(error);
     } finally {
@@ -356,7 +379,13 @@ export function McpPage() {
             <Space wrap size={[5, 5]}>
               <Label value={connection ? 'connected' : 'disconnected'} />
               {selectedProfile?.mcp && (
-                <Tag>{selectedProfile.mcp.transport === 'stdio' ? 'stdio' : 'Streamable HTTP'}</Tag>
+                <Tag>
+                  {selectedProfile.mcp.transport === 'stdio'
+                    ? 'stdio'
+                    : selectedProfile.mcp.transport === 'sse'
+                      ? 'HTTP + SSE'
+                      : 'Streamable HTTP'}
+                </Tag>
               )}
               {connection?.protocolVersion && <Tag>{connection.protocolVersion}</Tag>}
               {server?.version && <Typography.Text type="secondary">{server.version}</Typography.Text>}

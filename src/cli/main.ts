@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { failure, invalid } from '../app/errors.js';
 import { parseJson, readJson } from '../app/files.js';
@@ -9,12 +10,69 @@ import { Workbench, type CommandInput } from '../app/workbench.js';
 import { openProjectDatabase } from '../storage/database.js';
 import { Repository } from '../storage/repository.js';
 import { schemas } from '../schemas/index.js';
-import { booleanOptions, commands, globalOptions } from './commands.js';
+import { booleanOptions, commandReference, commands, globalOptions } from './commands.js';
 import { openLocation, version } from '../app/platform.js';
+import { cliGuide, guide } from '../app/guides.js';
+import { textGraph } from '../app/git-graph.js';
+import type { gitLog } from '../app/git-history.js';
+import type { VersionReport } from '../app/version-compare.js';
+import { referencedEnvironment } from '../protocols/variables.js';
+import { globalWorkspace, projectWorkspace, type CliInput } from './workspace.js';
 import type { Run } from '../app/runs.js';
 
 function envelope(command: string, data: unknown, error: unknown = null) {
   return { schemaVersion: 1, ok: error === null, command, data, error };
+}
+
+function presentation(name: string, input: CliInput, data: unknown) {
+  if (name === 'git log' && input.format) {
+    if (input.format !== 'graph' && input.format !== 'json') invalid('Expected graph or json format');
+    const history = data as Awaited<ReturnType<typeof gitLog>>;
+    if (input.format === 'graph')
+      return { data: { ...history, graph: textGraph(history.items) }, text: textGraph(history.items) + '\n' };
+  }
+  if (name === 'compare' && !input.async) {
+    const report = data as VersionReport;
+    const kind = String(input.kind ?? '');
+    if (kind && !['api', 'mcp', 'skill', 'files', 'diagnostics', 'all'].includes(kind))
+      invalid('Unknown comparison kind');
+    if (input.state && !['added', 'removed', 'changed'].includes(input.state))
+      invalid('Unknown comparison status');
+    if (input.format && !['json', 'markdown'].includes(input.format)) invalid('Expected json or markdown format');
+    const filters = { kind: input.kind, service: input.service, state: input.state, query: input.query };
+    const changes = report.changes.filter(
+      (change) =>
+        (!kind || kind === 'all' || kind === change.kind) &&
+        (!input.service || input.service === change.service) &&
+        (!input.state || input.state === change.status) &&
+        (!input.query || change.name.toLowerCase().includes(input.query.toLowerCase())),
+    );
+    const result = { ...report, changes, filters };
+    const lines = ['# IfaceForge comparison', '', report.effectiveBase + ' → ' + report.target.sha, ''];
+    if (kind === 'files')
+      lines.push(
+        ...report.files.map(
+          (file) => '- ' + file.status + ' ' + (file.previous ? file.previous + ' → ' : '') + file.path,
+        ),
+      );
+    else if (kind === 'diagnostics')
+      lines.push(
+        ...[...report.base.diagnostics, ...report.target.diagnostics].map(
+          (issue) => '- ' + (issue.path ?? '') + ' ' + issue.code + ' ' + issue.message,
+        ),
+      );
+    else lines.push(...changes.map((change) => '- ' + change.status + ' · ' + change.kind + ' · ' + change.name));
+    return { data: result, text: input.format === 'markdown' ? lines.join('\n') + '\n' : undefined };
+  }
+  if (name === 'compare file' && input.format) {
+    if (input.format !== 'patch' && input.format !== 'json') invalid('Expected patch or json format');
+    if (input.format === 'patch') return { data, text: (data as { text: string }).text };
+  }
+  if (name === 'wiki show' && input.out) {
+    if (!input.page) invalid('Specify --page to export a single Wiki page');
+    return { data, text: (data as { text: string }).text };
+  }
+  return { data };
 }
 
 async function main() {
@@ -47,6 +105,7 @@ async function main() {
                   : booleanOptions.has(key)
                     ? 'boolean'
                     : 'string',
+              ...(key === 'ref' ? { multiple: true } : {}),
             },
           ]),
         ),
@@ -84,7 +143,10 @@ async function main() {
     for (const token of tokens) {
       if (token.kind !== 'option') continue;
       const key = token.name;
-      if (used.has(key)) invalid('Duplicate option', { key });
+      if (used.has(key)) {
+        if (key === 'ref' && name === 'git log') continue;
+        invalid('Duplicate option', { key });
+      }
       used.add(key);
       if (globalOptions.includes(key)) continue;
       if (!desc.options.includes(key)) invalid('Unsupported option for ' + name, { key });
@@ -94,10 +156,32 @@ async function main() {
         if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
           invalid('Expected numeric option', { key });
         input[field] = Number(value);
+      } else if (key === 'ref') {
+        const refs = value as string[];
+        if (name === 'git log') input.refs = refs;
+        else input.ref = refs[0];
       } else input[field] = value;
     }
     if (name === 'commands') {
-      output({ globalOptions, items: commands });
+      output(commandReference());
+      return;
+    }
+    if (name === 'guide cli') {
+      if (json) output({ markdown: cliGuide(), commands: commandReference() });
+      else process.stdout.write(cliGuide());
+      return;
+    }
+    if (name === 'guide show') {
+      const language = input.lang ?? 'en';
+      if (language !== 'en' && language !== 'zh-CN') invalid('Unsupported guide language');
+      if (json) output(guide(language));
+      else process.stdout.write(guide(language).markdown);
+      return;
+    }
+    if (name === 'guide serve') {
+      if (json) invalid('The guide server uses MCP over stdio');
+      const { serveGuides } = await import('./guide-server.js');
+      serveGuides();
       return;
     }
     if (name === 'schema') {
@@ -119,22 +203,77 @@ async function main() {
     }
     if (typeof input.assertions === 'string') input.assertions = readJson(input.assertions);
     registry = new Projects();
+    const cliInput = input as CliInput;
+    const selector = typeof values.project === 'string' ? values.project : process.cwd();
+    const records = registry.list();
+    const knownProject = records.find((item) => item.id === selector);
+    if (name.startsWith('task ') && typeof values.project === 'string' && !knownProject) {
+      const root = locateProject(selector);
+      if (!records.some((project) => project.root === root)) invalid('Project is not registered', { root });
+    }
+    const taskProject =
+      typeof values.project === 'string' && name.startsWith('task ')
+        ? (knownProject?.id ?? records.find((item) => item.root === locateProject(selector))?.id)
+        : undefined;
+    const global = await globalWorkspace(name, cliInput, taskProject, (task) => {
+      if (cliInput.stream) process.stdout.write(JSON.stringify({ schemaVersion: 1, event: 'task', task }) + '\n');
+      else if (!json)
+        process.stderr.write(
+          ('state' in task
+            ? task.state +
+              ' ' +
+              task.stage +
+              ' ' +
+              task.processed +
+              (task.total === undefined ? '' : '/' + task.total)
+            : task.status + ' ' + task.steps.length) + '\n',
+        );
+    });
+    if (global) {
+      if (name === 'task watch') {
+        const task = global.data as { state?: string; status?: string; exitCode?: number };
+        process.exitCode = task.exitCode ?? (task.state === 'cancelled' ? 4 : task.state === 'failed' ? 3 : 0);
+      }
+      if (!cliInput.stream) output(global.data);
+      return;
+    }
     if (name === 'project list') {
-      output(registry.list());
+      output(records);
       return;
     }
     if (name === 'project add') {
-      output(registry.add(String(input.id)));
+      const path = resolve(String(input.id));
+      const root = locateProject(path);
+      if (cliInput.exact && realpathSync.native(path) !== root) invalid('Choose the worktree root', { root });
+      output(registry.add(root));
       return;
     }
-    const selector = typeof values.project === 'string' ? values.project : process.cwd();
-    const record = registry.list().find((item) => item.id === selector);
-    const id = record?.id ?? registry.add(locateProject(selector)).id;
-    repository = new Repository(openProjectDatabase(registry.paths(id)));
-    workbench = new Workbench(registry.paths(id), repository);
+    let id = knownProject?.id;
+    if (!id) {
+      try {
+        const root = locateProject(selector);
+        id = records.find((item) => item.root === root && !item.hidden)?.id ?? registry.add(root).id;
+      } catch (error) {
+        const selected = typeof values.project === 'string' ? undefined : registry.preference('selected');
+        if (!selected || !records.some((item) => item.id === selected && !item.hidden)) throw error;
+        id = selected;
+      }
+    }
+    const paths = registry.paths(id);
+    repository = new Repository(openProjectDatabase(paths));
+    if (cliInput.async && cliInput.out) invalid('Wait for the task before writing its output');
+    const env = /^(?:api (?:preview|send|curl)|mcp |test run)/.test(name)
+      ? referencedEnvironment([
+          input,
+          repository.list('profiles'),
+          ...(name === 'test run' ? [repository.list('cases')] : []),
+        ])
+      : undefined;
     process.on('SIGINT', interrupt);
     process.on('SIGTERM', interrupt);
-    const data = await workbench.execute(name, input as CommandInput);
+    const remote = await projectWorkspace(name, id, cliInput, env);
+    if (!remote) workbench = new Workbench(paths, repository);
+    const data = remote ? remote.data : await workbench!.execute(name, input as CommandInput);
     if (name === 'wiki open') openLocation((data as { out: string }).out);
     const run = data as Partial<Run> | undefined;
     if (run?.exitCode && !['run show', 'run export', 'run cancel'].includes(name)) {
@@ -149,7 +288,18 @@ async function main() {
         output(data);
         process.stderr.write(error.message + '\n');
       }
-    } else output(data);
+    } else {
+      const result = presentation(name, cliInput, data);
+      if (cliInput.out && ['compare', 'compare file', 'wiki show'].includes(name)) {
+        const path = resolve(cliInput.out);
+        writeFileSync(path, result.text ?? JSON.stringify(result.data, null, 2) + '\n', {
+          flag: cliInput.replace ? 'w' : 'wx',
+          mode: 0o600,
+        });
+        output({ out: path, format: cliInput.format ?? (name === 'wiki show' ? 'markdown' : 'json') });
+      } else if (!json && result.text !== undefined) process.stdout.write(result.text);
+      else output(result.data);
+    }
   } catch (error) {
     const err = failure(error);
     process.exitCode = err.exitCode;

@@ -1,5 +1,5 @@
 import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,13 @@ export function fixture(name = 'express') {
     },
     destroy() {
       if (dirname(realpathSync.native(base)) !== parent) throw new Error('Unexpected fixture directory');
+      if (existsSync(join(data, '.ipc-token'))) {
+        execFileSync(process.execPath, [cli, 'service', 'stop', '--force', '--json'], {
+          env: fixtureEnv(root),
+          windowsHide: true,
+          timeout: 15000,
+        });
+      }
       directories.delete(root);
       rmSync(base, { recursive: true });
     },

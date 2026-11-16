@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, net, protocol, shell, utilityProcess } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, net, protocol, shell } from 'electron';
 import { basename, extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +8,7 @@ import { dataHome } from '../app/project.js';
 import type { CommandInput } from '../app/workbench.js';
 import type { EngineRequest, FileKind, Result } from './protocol.js';
 import type { Locale } from '../app/config.js';
+import { ensureService, serviceRequest } from './service-client.js';
 
 const origin = 'ifaceforge://workbench';
 const page = origin + '/index.html';
@@ -22,13 +23,7 @@ protocol.registerSchemesAsPrivileged([
 const ui = new URL('../../src/desktop/preload.cjs', import.meta.url);
 const preload = fileURLToPath(ui);
 let window: BrowserWindow | undefined;
-let engine: Electron.UtilityProcess | undefined;
-let seq = 0;
 let quitting = false;
-const pending = new Map<
-  number,
-  { done: (result: Result<unknown>) => void; timer: ReturnType<typeof setTimeout> }
->();
 const candidates = new Map<string, string>();
 const selectedFiles = new Map<string, { path: string; project: string; kind: FileKind }>();
 const unavailable: Result<never> = {
@@ -36,42 +31,12 @@ const unavailable: Result<never> = {
   error: { code: 'ENGINE_UNAVAILABLE', message: 'The workspace engine is unavailable.' },
 };
 
-function startEngine() {
-  engine = utilityProcess.fork(fileURLToPath(new URL('./engine.js', import.meta.url)), [], {
-    serviceName: 'IfaceForge Workspace',
-    stdio: 'pipe',
-  });
-  engine.stdout?.resume();
-  engine.stderr?.on('data', (data) => {
-    if (!app.isPackaged) process.stderr.write(data);
-  });
-  engine.on('message', ({ id, result }: { id: number; result: Result<unknown> }) => {
-    const call = pending.get(id);
-    if (!call) return;
-    clearTimeout(call.timer);
-    pending.delete(id);
-    call.done(result);
-  });
-  engine.on('exit', () => {
-    engine = undefined;
-    for (const { done, timer } of pending.values()) {
-      clearTimeout(timer);
-      done(unavailable);
-    }
-    pending.clear();
-  });
-}
-function send(request: EngineRequest): Promise<Result<unknown>> {
-  if (!engine) return Promise.resolve(unavailable);
-  const id = ++seq;
-  return new Promise((done) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      done({ ok: false, error: { code: 'ENGINE_TIMEOUT', message: 'The workspace engine did not respond.' } });
-    }, 120_000);
-    pending.set(id, { done, timer });
-    engine!.postMessage({ id, request });
-  });
+async function send(request: EngineRequest): Promise<Result<unknown>> {
+  if (quitting) return unavailable;
+  const existing = await serviceRequest(request);
+  if (existing) return existing;
+  await ensureService();
+  return (await serviceRequest(request)) ?? unavailable;
 }
 function safe<T>(data: T): Result<T> {
   return { ok: true, data };
@@ -258,16 +223,8 @@ else {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
-  app.on('before-quit', (event) => {
-    if (quitting || !engine) return;
-    event.preventDefault();
+  app.on('before-quit', () => {
     quitting = true;
-    void Promise.race([send({ method: 'close' }), new Promise((resolve) => setTimeout(resolve, 6000))]).finally(
-      () => {
-        engine?.kill();
-        app.quit();
-      },
-    );
   });
   void app.whenReady().then(() => {
     protocol.handle('ifaceforge', async (request) => {
@@ -281,7 +238,6 @@ else {
       headers.set('X-Content-Type-Options', 'nosniff');
       return new Response(asset.body, { status: asset.status, headers });
     });
-    startEngine();
     addHandlers();
     createWindow();
   });

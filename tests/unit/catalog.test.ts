@@ -43,7 +43,7 @@ it('merges route evidence, searches skill text and keeps the active snapshot whe
   const write = (path: string, value: string) => writeFileSync(join(project.root, path), value);
   mkdirSync(join(project.root, 'tasks'));
   write('tasks/SKILL.md', '---\nname: tasks\ndescription: Read tasks\n---\n任务说明 [missing](missing.md)');
-  write('app.js', "app.get('/tasks/:id', handler);");
+  write('app.js', "import express from 'express'; const app = express(); app.get('/tasks/:id', handler);");
   write('openapi.yml', 'openapi: 3.1.0\npaths:\n  /tasks/{taskId}:\n    get:\n      summary: Read task\n');
   const db = openProjectDatabase(project);
   try {
@@ -68,12 +68,18 @@ it('merges route evidence, searches skill text and keeps the active snapshot whe
 
 it('reports real scan progress and leaves the previous snapshot intact when cancelled', () => {
   const project = fixture();
-  writeFileSync(join(project.root, 'routes.js'), "app.get('/original', handler);");
+  writeFileSync(
+    join(project.root, 'routes.js'),
+    "import express from 'express'; const app = express(); app.get('/original', handler);",
+  );
   const db = openProjectDatabase(project);
   try {
     const repository = new Repository(db);
     const original = scanProject(project, repository, { includeUntracked: true });
-    writeFileSync(join(project.root, 'routes.js'), "app.get('/edited', handler);");
+    writeFileSync(
+      join(project.root, 'routes.js'),
+      "import express from 'express'; const app = express(); app.get('/edited', handler);",
+    );
     const stages: string[] = [];
     expect(() =>
       scanProject(project, repository, {
@@ -87,6 +93,86 @@ it('reports real scan progress and leaves the previous snapshot intact when canc
     expect(stages).toEqual(['enumerating', 'processing', 'saving']);
     expect(activeSnapshot(repository)?.id).toBe(original.id);
     expect(repository.list('scans')).toHaveLength(1);
+  } finally {
+    db.close();
+  }
+});
+
+it('verifies Express receivers, preserves client calls as evidence, and reports custom Python coverage', () => {
+  const project = fixture();
+  const write = (path: string, value: string) => writeFileSync(join(project.root, path), value);
+  write(
+    'browser.ts',
+    [
+      'const api = createManagementApi();',
+      'void api.get("/browser-only");',
+      'void api.get("/documented?q=page");',
+      'void fetch("/fetch-only", { method: "POST" });',
+    ].join('\n'),
+  );
+  write(
+    'server.ts',
+    [
+      'import web, { Router as makeRouter } from "express";',
+      'const api = web(), sub = makeRouter();',
+      'const alias = sub;',
+      'const pattern = "/widgets/:id";',
+      'alias.get(pattern, respond);',
+      'api.route("/documented").get(respond);',
+      'function render(api) { api.get("/shadowed", respond); }',
+      'api.get(pathFromConfig, respond);',
+      'const other = new Map(); other.get("/map-only");',
+    ].join('\n'),
+  );
+  write(
+    'common.cjs',
+    [
+      'const { Router: localRoutes } = require("express");',
+      'const router = localRoutes();',
+      'router.post("/common", respond);',
+    ].join('\n'),
+  );
+  write('contract.json', JSON.stringify({ openapi: '3.1.0', paths: { '/documented': { get: {} } } }));
+  write(
+    'handler.py',
+    [
+      'from urllib.parse import urlsplit',
+      'def dispatch(handler):',
+      '    route = urlsplit(handler.path)',
+      '    if handler.command != "GET":',
+      '        raise ValueError(route)',
+    ].join('\n'),
+  );
+  write('another.py', 'from flask import Flask\n@app.get("/flask")\ndef route(): pass\n');
+  const db = openProjectDatabase(project);
+  try {
+    const repository = new Repository(db);
+    const snapshot = scanProject(project, repository, { includeUntracked: true });
+    const result = searchCatalog(repository, { kind: 'api' });
+    expect(result.items.map((item) => item.name)).toEqual([
+      'GET /documented',
+      'GET /widgets/{id}',
+      'POST /common',
+    ]);
+    expect(result.items[0].observations.map((entry) => entry.origin).sort()).toEqual([
+      'call-site',
+      'declaration',
+      'source',
+    ]);
+    expect(result.items[0].differences).toEqual([]);
+    expect(result.coverage).toMatchObject({
+      unresolved: 2,
+      examples: expect.arrayContaining([
+        expect.objectContaining({ path: 'handler.py', line: 2, code: 'HTTP_HANDLER_UNRESOLVED' }),
+        expect.objectContaining({ path: 'server.ts', line: 8, code: 'DYNAMIC_ROUTE' }),
+      ]),
+    });
+    expect(snapshot.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'HTTP_CALL_SITE', path: 'browser.ts', line: 2 }),
+        expect.objectContaining({ code: 'HTTP_CALL_SITE', path: 'browser.ts', line: 4 }),
+      ]),
+    );
   } finally {
     db.close();
   }

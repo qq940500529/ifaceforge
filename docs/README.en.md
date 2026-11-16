@@ -19,6 +19,13 @@ The server directory shows tools, resources, resource templates, and prompts exp
 
 Use **Save as case** to replay a check through the Tests page or the CLI. Save checks for all four types and run them together in a suite. You can also import OpenAPI, test HTTP requests, browse skills, and export a local Wiki.
 
+## Compare branches and commits
+
+Use the top bar to browse a branch, or open **Versions and comparison** to select two commits in the Git network. Review changes to API, MCP, and Skills definitions alongside file patches and sources. History pages load as requested. File scans run for the selected endpoints and reuse completed snapshots.
+
+> [!TIP]
+> See the [developer guide](developer-guide.en.md) for language-independent declarations, working examples, and the compatibility matrix.
+
 <details>
 <summary>Build from source</summary>
 <pre><code>npm ci

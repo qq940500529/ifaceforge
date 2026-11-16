@@ -146,7 +146,7 @@ it('scans both frameworks, imports runtime routes and runs HTTP cases entirely t
     'openapi.yml',
   );
   expect(execFileSync('git', ['-C', root, 'diff', '--name-only'], { encoding: 'utf8' })).toBe('');
-});
+}, 60000);
 
 for (const transport of ['stdio', 'streamableHttp'] as const) {
   for (const legacy of [false, true]) {

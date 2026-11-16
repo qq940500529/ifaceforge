@@ -2,7 +2,15 @@ import type { DatabaseSync } from 'node:sqlite';
 import { AppError } from '../app/errors.js';
 
 export type Collection =
-  'profiles' | 'scans' | 'scan_files' | 'cases' | 'suites' | 'runs' | 'wiki_exports' | 'observations';
+  | 'profiles'
+  | 'scans'
+  | 'scan_files'
+  | 'cases'
+  | 'suites'
+  | 'runs'
+  | 'wiki_exports'
+  | 'observations'
+  | 'git_snapshots';
 
 export class Repository {
   constructor(readonly db: DatabaseSync) {}

@@ -33,6 +33,9 @@ export class Projects {
       'CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, root TEXT NOT NULL, pathKey TEXT NOT NULL UNIQUE, identity TEXT NOT NULL, hidden INTEGER NOT NULL, lastOpened TEXT NOT NULL) STRICT',
     );
     this.db.exec('CREATE TABLE IF NOT EXISTS preferences (name TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT');
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS workspace_tasks (id TEXT PRIMARY KEY, project TEXT NOT NULL, started INTEGER NOT NULL, record TEXT NOT NULL) STRICT',
+    );
   }
 
   close() {
@@ -96,6 +99,32 @@ export class Projects {
     const managed = this.managedPath(id);
     rmSync(managed, { recursive: true, force: true });
     this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM workspace_tasks WHERE project = ?').run(id);
+  }
+
+  putTask(task: { id: string; project: string; started: number }) {
+    this.db
+      .prepare(
+        'INSERT INTO workspace_tasks VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET record = excluded.record',
+      )
+      .run(task.id, task.project, task.started, JSON.stringify(task));
+    this.db
+      .prepare(
+        'DELETE FROM workspace_tasks WHERE project = ? AND id IN (SELECT id FROM workspace_tasks WHERE project = ? ORDER BY started DESC LIMIT -1 OFFSET 50)',
+      )
+      .run(task.project, task.project);
+  }
+
+  task<T>(id: string) {
+    const { record } = this.db.prepare('SELECT record FROM workspace_tasks WHERE id = ?').get(id) ?? {};
+    return typeof record === 'string' ? (JSON.parse(record) as T) : undefined;
+  }
+
+  savedTasks<T>() {
+    return this.db
+      .prepare('SELECT record FROM workspace_tasks ORDER BY started DESC')
+      .all()
+      .map(({ record }) => JSON.parse(String(record)) as T);
   }
 
   relocate(id: string, directory: string) {

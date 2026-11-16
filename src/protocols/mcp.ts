@@ -1,5 +1,6 @@
 import {
   Client,
+  SSEClientTransport,
   StreamableHTTPClientTransport,
   isInputRequiredResult,
   type RequestOptions,
@@ -118,10 +119,17 @@ export class McpSession {
   static async connect(profile: Profile, root: string, bindings: Bindings, signal?: AbortSignal) {
     const config = profile.mcp;
     if (!config) invalid('Selected profile does not contain an MCP connection');
+    const pin = config.protocolVersion;
+    if (config.transport === 'sse' && pin === '2026-07-28')
+      invalid('2026-07-28 does not use the legacy SSE transport');
     const client = new Client(
       { name: 'IfaceForge', version },
       {
-        versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2500 } },
+        supportedProtocolVersions: pin ? [pin] : undefined,
+        versionNegotiation: {
+          mode: pin === '2026-07-28' ? { pin } : pin || config.transport === 'sse' ? 'legacy' : 'auto',
+          probe: { timeoutMs: 2500 },
+        },
       },
     );
     const session = new McpSession(client);
@@ -137,9 +145,12 @@ export class McpSession {
             stderr: 'ignore',
             maxBufferSize: 2 * 1024 * 1024,
           })
-        : new StreamableHTTPClientTransport(httpUrl(String(bindings.resolve(config.url))), {
-            requestInit: { headers: new Headers(headerPairs(config.headers, bindings)), redirect: 'error' },
-          });
+        : new (config.transport === 'sse' ? SSEClientTransport : StreamableHTTPClientTransport)(
+            httpUrl(String(bindings.resolve(config.url))),
+            {
+              requestInit: { headers: new Headers(headerPairs(config.headers, bindings)), redirect: 'error' },
+            },
+          );
     const abort = () => {
       void session.close().catch(() => undefined);
     };

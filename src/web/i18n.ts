@@ -1,6 +1,8 @@
 const en = {
   brand: 'IfaceForge',
   catalog: 'Catalog',
+  versions: 'Versions',
+  guides: 'Developer guide',
   api: 'HTTP API',
   mcp: 'MCP',
   skill: 'Skills',
@@ -132,6 +134,7 @@ const en = {
   removedCount: '{count} records',
   declaration: 'Declaration',
   source: 'Source',
+  'call-site': 'Client call',
   runtime: 'Runtime',
   matched: 'Matched',
   MISSING_CONTRACT: 'Missing contract',
@@ -170,6 +173,8 @@ export type Key = keyof typeof en;
 const zh: Record<Key, string> = {
   brand: '接口工坊',
   catalog: '目录',
+  versions: '版本与对比',
+  guides: '开发指南',
   api: 'HTTP API',
   mcp: 'MCP',
   skill: '技能',
@@ -301,6 +306,7 @@ const zh: Record<Key, string> = {
   removedCount: '{count} 条记录',
   declaration: '声明',
   source: '源码',
+  'call-site': '客户端调用',
   runtime: '运行发现',
   matched: '已匹配',
   MISSING_CONTRACT: '缺少契约',

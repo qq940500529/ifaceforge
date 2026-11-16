@@ -505,3 +505,10 @@ pre.code {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.catalog-coverage-list button {
+  height: auto;
+  padding-inline: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}

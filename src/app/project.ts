@@ -33,6 +33,7 @@ function gitOptions() {
   const env = { ...process.env };
   for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY'])
     delete env[key];
+  env.GIT_NO_LAZY_FETCH = '1';
   return { encoding: 'utf8', windowsHide: true, env, maxBuffer: 32 * 1024 * 1024, timeout: 60_000 } as const;
 }
 
@@ -41,9 +42,19 @@ export function git(root: string, args: string[]) {
 }
 
 const executeGit = promisify(execFile);
-export async function gitAsync(root: string, args: string[], signal: AbortSignal) {
+export async function gitAsync(root: string, args: string[], signal?: AbortSignal) {
   const { stdout } = await executeGit('git', ['-C', root, ...args], { ...gitOptions(), signal });
   return stdout;
+}
+
+export function gitBuffer(root: string, args: string[], input?: string, maxBuffer = 32 * 1024 * 1024) {
+  return execFileSync('git', ['-C', root, ...args], {
+    ...gitOptions(),
+    input,
+    maxBuffer,
+    encoding: undefined,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
 }
 
 export function locateProject(directory: string): string {

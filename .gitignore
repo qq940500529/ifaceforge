@@ -11,6 +11,7 @@ test-results/
 .devtools/
 .env
 .env.*
+.ipc-token
 !.env.example
 *.sqlite
 *.sqlite-shm

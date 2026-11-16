@@ -1,11 +1,19 @@
 import { basename, dirname, posix } from 'node:path';
 import { existsSync } from 'node:fs';
-import { digest, projectFile } from '../app/files.js';
+import { digest, projectFile, protectedSource, type ScanSource } from '../app/files.js';
 import type { Adapter } from '../app/config.js';
 import { apiId, mcpId, type Diagnostic, type Observation } from './model.js';
+import { scanMcpSource } from './mcp-discovery.js';
+import { scanExpressSource } from './express.js';
 import { mapping, yamlDocument } from './openapi.js';
 
-export function parseSkill(root: string, path: string, text: string, diagnostics: Diagnostic[]): Observation {
+export function parseSkill(
+  root: string,
+  path: string,
+  text: string,
+  diagnostics: Diagnostic[],
+  historical?: ScanSource,
+): Observation {
   const match = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
   let metadata: Record<string, unknown> = {};
   if (match) {
@@ -41,8 +49,16 @@ export function parseSkill(root: string, path: string, text: string, diagnostics
       pathToReference = posix.normalize(
         posix.join(posix.dirname(path), decodeURIComponent(href.split(/[?#]/, 1)[0])),
       );
-      const entry = projectFile(root, pathToReference, false);
-      references.set(href, { path: pathToReference, status: existsSync(entry) ? 'available' : 'missing' });
+      if (
+        /^(?:\.\.?(?:\/|$)|\/)/.test(pathToReference) ||
+        pathToReference.includes('\\') ||
+        protectedSource.test(pathToReference)
+      )
+        throw Error('Outside source viewer');
+      const available = historical
+        ? historical.has(pathToReference)
+        : existsSync(projectFile(root, pathToReference, false));
+      references.set(href, { path: pathToReference, status: available ? 'available' : 'missing' });
     } catch {
       references.set(href, { path: pathToReference, status: 'outside' });
     }
@@ -56,7 +72,13 @@ export function parseSkill(root: string, path: string, text: string, diagnostics
     origin: 'declaration',
     path,
     line: 1,
-    definition: { metadata, body, references: [...references.values()] },
+    definition: {
+      format: 'Agent Skills',
+      version: mapping(metadata.metadata).version,
+      metadata,
+      body,
+      references: [...references.values()],
+    },
   };
 }
 
@@ -69,7 +91,13 @@ export function parseMcpConfig(
   return Object.entries(mapping(mapping(value).mcpServers)).flatMap(([name, raw]) => {
     const entry = mapping(raw);
     const transport =
-      typeof entry.url === 'string' ? 'streamableHttp' : typeof entry.command === 'string' ? 'stdio' : null;
+      typeof entry.url === 'string'
+        ? entry.type === 'sse' || entry.transport === 'sse'
+          ? 'sse'
+          : 'streamableHttp'
+        : typeof entry.command === 'string'
+          ? 'stdio'
+          : null;
     if (!transport) {
       diagnostics.push({ path, code: 'MCP_CONFIG', message: 'Missing URL or command for ' + name });
       return [];
@@ -90,10 +118,63 @@ export function parseMcpConfig(
 }
 
 const extensions = /\.(?:[cm]?[jt]sx?)$/i;
-const javascriptPattern =
-  /\b[\w$.]+\.(get|post|put|patch|delete|options|head|all|use)\s*\(\s*(['"])([^'"\r\n]+)\2/;
 const pythonPattern = /^\s*@[\w.]+\.(get|post|put|patch|delete|options|head|trace)\s*\(\s*(['"])([^'"\r\n]+)\2/;
-const mcpPattern = /\b[\w$.]+\.(tool|registerTool)\s*\(\s*(['"])([^'"\r\n]+)\2/;
+
+function pythonSource(
+  path: string,
+  text: string,
+  service: string,
+  diagnostics: Diagnostic[],
+  checkpoint?: () => void,
+) {
+  const observations: Observation[] = [];
+  const lines = text.split(/\r?\n/);
+  const handler = lines.findIndex((line) =>
+    /^\s*(?:class\s+\w+\([^)]*\b(?:BaseHTTPRequestHandler|SimpleHTTPRequestHandler)\b|def\s+do_(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s*\()/.test(
+      line,
+    ),
+  );
+  const dispatch = /\b([A-Za-z_]\w*)\.command\b/.exec(text);
+  if (handler >= 0 || (dispatch && new RegExp('\\b' + dispatch[1] + '\\.path\\b').test(text))) {
+    const dispatchLine = lines.findIndex((line) => /^\s*(?:async\s+)?def\s+\w*dispatch\w*\s*\(/.test(line));
+    const definition = dispatchLine >= 0 ? dispatchLine : handler;
+    diagnostics.push({
+      path,
+      line: definition >= 0 ? definition + 1 : text.slice(0, dispatch!.index).split('\n').length,
+      code: 'HTTP_HANDLER_UNRESOLVED',
+      message: 'Custom Python HTTP dispatch has route branches outside static FastAPI discovery',
+    });
+  }
+  if (!/^\s*(?:from\s+fastapi(?:\.\w+)*\s+import\b|import\s+fastapi\b)/m.test(text)) return observations;
+  for (const [index, line] of lines.entries()) {
+    if (index % 256 === 0) checkpoint?.();
+    const match = pythonPattern.exec(line);
+    if (!match) {
+      if (/^\s*@\w+\.(?:get|post|put|patch|delete)\(/.test(line))
+        diagnostics.push({
+          path,
+          line: index + 1,
+          code: 'DYNAMIC_ROUTE',
+          message: 'FastAPI registration has a non-literal or multiline path',
+        });
+      continue;
+    }
+    const [, method, , route] = match;
+    if (route.startsWith('/'))
+      observations.push({
+        id: apiId(service, method, route),
+        kind: 'api',
+        service,
+        name: method.toUpperCase() + ' ' + route,
+        summary: '',
+        origin: 'source',
+        path,
+        line: index + 1,
+        definition: { method, path: route, adapter: 'fastapi' },
+      });
+  }
+  return observations;
+}
 
 export function scanSource(
   path: string,
@@ -104,66 +185,13 @@ export function scanSource(
   checkpoint?: () => void,
 ) {
   const observations: Observation[] = [];
-  const javascript = extensions.test(path);
-  const python = /\.py$/i.test(path);
-  const supported = [
-    javascript && adapters.includes('express') && { pattern: javascriptPattern, name: 'express' },
-    python && adapters.includes('fastapi') && { pattern: pythonPattern, name: 'fastapi' },
-    javascript && adapters.includes('mcp-typescript') && { pattern: mcpPattern, name: 'mcp-typescript' },
-  ].filter((entry) => entry !== false);
-  let inComment = false;
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
-    if (index % 256 === 0) checkpoint?.();
-    const trimmed = line.trimStart();
-    if (javascript && trimmed.startsWith('/*')) inComment = !trimmed.includes('*/');
-    if (inComment || /^(?:\/\/|#|\/\*)/.test(trimmed)) {
-      if (inComment && trimmed.includes('*/')) inComment = false;
-      continue;
-    }
-    for (const { pattern, name: adapter } of supported) {
-      const match = pattern.exec(line);
-      if (!match) {
-        if (
-          (adapter === 'fastapi' && /^@\w+\.(?:get|post|put|patch|delete)\(/.test(trimmed)) ||
-          (adapter === 'express' && /\b(?:app|router)\.(?:get|post|put|patch|delete)\(/.test(trimmed)) ||
-          (adapter === 'mcp-typescript' && /\.(?:tool|registerTool)\(/.test(trimmed))
-        ) {
-          diagnostics.push({
-            path,
-            code: 'DYNAMIC_ROUTE',
-            message: adapter + ' dynamic or multiline registration at ' + (index + 1),
-          });
-        }
-        continue;
-      }
-      const [, method, , value] = match;
-      if (adapter === 'mcp-typescript') {
-        observations.push({
-          id: mcpId(service, 'tool', value),
-          kind: 'mcp',
-          service,
-          name: value,
-          summary: '',
-          origin: 'source',
-          path,
-          line: index + 1,
-          definition: { type: 'tool', adapter },
-        });
-      } else if (value.startsWith('/') && method !== 'use' && method !== 'all') {
-        const route = value.replace(/:([\w]+)/g, '{$1}');
-        observations.push({
-          id: apiId(service, method, route),
-          kind: 'api',
-          service,
-          name: method.toUpperCase() + ' ' + route,
-          summary: '',
-          origin: 'source',
-          path,
-          line: index + 1,
-          definition: { method, path: route, adapter },
-        });
-      }
-    }
+  if (/\.py$/i.test(path) && adapters.includes('fastapi'))
+    return pythonSource(path, text, service, diagnostics, checkpoint);
+  if (extensions.test(path)) {
+    if (adapters.includes('express'))
+      observations.push(...scanExpressSource(path, text, service, diagnostics, checkpoint));
+    if (adapters.includes('mcp-typescript'))
+      observations.push(...scanMcpSource(path, text, service, diagnostics, checkpoint));
   }
   return observations;
 }

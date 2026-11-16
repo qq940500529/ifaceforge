@@ -2,7 +2,7 @@
   <img src="build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge · 接口工坊</h1>
   <p><strong>本机 Git 项目的接口与测试工作台</strong></p>
-  <p>浏览 MCP 服务的实际内容，调试 HTTP 接口，把验证保存为可复跑的用例。</p>
+  <p>浏览和比较 Git 版本中的 API、MCP 与 Skills，把接口验证保存为可复跑的用例。</p>
   <p>
     <a href="https://github.com/qq940500529/ifaceforge/releases"><img alt="下载桌面安装包" src="https://img.shields.io/github/v/release/qq940500529/ifaceforge?include_prereleases&amp;label=%E4%B8%8B%E8%BD%BD&amp;color=245fc4"></a>
     <a href="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml"><img alt="三平台验证" src="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml/badge.svg"></a>
@@ -25,6 +25,20 @@
 
 > [!TIP]
 > 选中 MCP 条目即可打开测试。在同一处查看定义、填写参数、检查返回内容并保存用例。
+
+### 浏览和比较 Git 版本
+
+在顶栏选择要浏览的分支，或打开 **版本与对比** 从 Git 网络图选择两个提交。可查看接口定义变化、文件差异和来源，并导出 JSON 报告。历史内容按选择读取，适合拥有大量分支和提交的仓库。
+
+<details>
+<summary>查看版本对比界面</summary>
+
+![Git 网络图、共同祖先选择和 API、MCP、技能对比结果](docs/assets/version-comparison.png)
+
+</details>
+
+> [!TIP]
+> 提交 OpenAPI、`mcp-capabilities.json` 和 `SKILL.md` 后，任何开发语言的项目都可以使用声明参与历史扫描。如何组织声明与测试，请参阅 [开发指南](docs/developer-guide.md)。
 
 ## 工作台
 
@@ -52,7 +66,7 @@ npm start
 
 ## 文档与社区
 
-[桌面使用手册](docs/workbench.md) · [MCP 测试指南](docs/mcp.md) · [CLI 参考](docs/cli.md) · [发行记录](https://github.com/qq940500529/ifaceforge/releases)
+[桌面使用手册](docs/workbench.md) · [MCP 测试指南](docs/mcp.md) · [开发指南](docs/developer-guide.md) · [CLI 参考](docs/cli.md) · [AI 调用指南](docs/cli-agent.md) · [发行记录](https://github.com/qq940500529/ifaceforge/releases)
 
 [Discussions](https://github.com/qq940500529/ifaceforge/discussions) · [提交问题](https://github.com/qq940500529/ifaceforge/issues/new/choose) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md)
 
