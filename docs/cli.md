@@ -37,7 +37,7 @@ ifg source show --path openapi.yml --json
 
 The initial scan uses tracked files. Add `--include-untracked` for new, unignored files. Use `--full` to bypass scan caching. Source reads accept UTF-8 project paths. `config apply` writes only to the local SQLite settings. For example, `{"schemaVersion":1,"locale":"zh-CN","scan":{"includeUntracked":true}}`.
 
-## HTTP and MCP
+## HTTP
 
 A profile file for the Express example can contain the following document. From the IfaceForge repository, launch the fixture with `node fixtures/express/app.mjs`.
 
@@ -68,17 +68,22 @@ ifg api export capability-id --format yaml --json
 
 A request file can be `{"method":"GET","path":"/tasks/42"}`. Use a path and profile, or an absolute HTTP(S) URL. Send query and header pairs in separate arrays. For a body use `{"type":"json","content":{"title":"Sample"}}`.
 
+## MCP
+
 Create a profile with `mcp` set to `{"transport":"stdio","command":"node","args":["fixtures/express/mcp.mjs","stdio"]}` when the current project is the IfaceForge repository. For Streamable HTTP, start `node fixtures/express/mcp.mjs http modern` and use `{"transport":"streamableHttp","url":"http://127.0.0.1:4301/mcp"}`. The optional final argument to the server chooses its listening port. Use `legacy` in place of `modern` to exercise the 2025 protocol.
 
 ```sh
 ifg mcp discover --profile sample-stdio --json
 ifg mcp call echo --profile sample-stdio --args echo-args.json --json
 ifg mcp read task://42 --profile sample-stdio --json
+ifg mcp template 'task://{id}' --profile sample-stdio --args template-args.json --assertions assertions.json --json
 ifg mcp prompt task-summary --profile sample-stdio --args prompt-args.json --json
 ifg mcp batch --profile sample-stdio --file sequence.json --json
 ```
 
-Echo parameters are `{"value":"example"}`. Prompt parameters are `{"title":"Sample task"}`. For a batch, use a document with `schemaVersion: 1` and named steps with type `discover`, `call`, `read` or `prompt`. A step with `"extract":{"text":"/value"}` can supply `{{text}}` to a later step. Use batches or suites to reuse a connection.
+Echo parameters are `{"value":"example"}`. Template parameters are `{"id":42}`. Prompt parameters are `{"title":"Sample task"}`. Pass an optional JSON assertion array such as `[{"type":"textContains","pointer":"/contents/0/text","text":"Task"}]` to `--assertions` on any of these four actions. See the [MCP guide](mcp.md) for test details.
+
+A batch has `schemaVersion: 1` and named steps with type `discover`, `call`, `read`, `template` or `prompt`. Steps accept `assertions`. A step with `"extract":{"text":"/value"}` can supply `{{text}}` to a later step. Use batches or suites to reuse a connection.
 
 ## Cases and reports
 

@@ -1,35 +1,59 @@
-# IfaceForge · 接口工坊
+<div align="center">
+  <img src="build/icons/icon.png" width="76" height="76" alt="IfaceForge">
+  <h1>IfaceForge · 接口工坊</h1>
+  <p><strong>本机 Git 项目的接口与测试工作台</strong></p>
+  <p>浏览 MCP 服务的实际内容，调试 HTTP 接口，把验证保存为可复跑的用例。</p>
+  <p>
+    <a href="https://github.com/qq940500529/ifaceforge/releases"><img alt="下载桌面安装包" src="https://img.shields.io/github/v/release/qq940500529/ifaceforge?include_prereleases&amp;label=%E4%B8%8B%E8%BD%BD&amp;color=245fc4"></a>
+    <a href="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml"><img alt="三平台验证" src="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml/badge.svg"></a>
+    <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/License-MIT-28746a"></a>
+  </p>
+  <p><a href="https://qq940500529.github.io/ifaceforge/">文档站</a> · <a href="docs/README.en.md">English</a> · <a href="docs/mcp.md">MCP 指南</a> · <a href="docs/cli.md">CLI</a> · <a href="CHANGELOG.md">更新日志</a></p>
+</div>
 
-**在一个桌面窗口里浏览、调试和测试多个 Git 项目的接口。**
+<a href="docs/mcp.md"><img src="docs/assets/mcp-workbench.png" alt="IfaceForge MCP 工作台，左侧为服务目录，右侧为参数、断言和测试结果"></a>
 
-[![Verify](https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml/badge.svg)](https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml)
-[![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+## 开始使用
 
-[下载安装包](https://github.com/qq940500529/ifaceforge/releases) · [English](docs/README.en.md) · [使用手册](docs/workbench.md) · [CLI](docs/cli.md) · [参与贡献](CONTRIBUTING.md)
+| Windows x64                       | macOS Apple Silicon              | Linux x64                          |
+| :-------------------------------- | :------------------------------- | :--------------------------------- |
+| 运行 EXE 安装向导，可选择安装位置 | 打开 DMG，把应用拖到有权限的目录 | 运行 AppImage，或使用 DEB / RPM 包 |
 
-## 三步开始
+1. 从 [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases) 下载对应安装包，并确保 Git 可从 `PATH` 找到。
+2. 打开 IfaceForge，点击 **添加项目**，选择本机 Git 工作树或其中的文件夹。
+3. 点击 **扫描项目** 查看目录。进入 **MCP**，选择环境并连接，目录会加载该服务提供的能力。
 
-1. 从 [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases) 下载与你的系统、架构对应的桌面预览包。Windows 安装向导支持选择安装目录。macOS 从 DMG 拖放应用。Linux 可选 AppImage、DEB 或 RPM。
-2. 打开 IfaceForge，点击 **添加项目**，选择本机 Git 工作树中的文件夹。选择子目录时，界面会请你确认 Git 工作树根。先安装 Git，并确保应用能从 `PATH` 找到它。
-3. 点击 **扫描项目**。页内浮窗显示阶段和进度。扫描时可以收起浮窗、取消任务或切换项目。打开 **目录** 查看发现的能力。
-
-![IfaceForge 桌面工作台中的扫描结果](docs/assets/catalog.png)
+> [!TIP]
+> 选中 MCP 条目即可打开测试。在同一处查看定义、填写参数、检查返回内容并保存用例。
 
 ## 工作台
 
-| 界面       | 常用操作                                                                  |
-| ---------- | ------------------------------------------------------------------------- |
-| 目录和技能 | 搜索、筛选、查看来源和定义。技能可以阅读正文和本地引用。                  |
-| HTTP API   | 导入 OpenAPI，编辑和发送请求，检查响应与断言，导出接口定义。              |
-| MCP        | 使用环境配置连接 stdio 或 Streamable HTTP，发现并调用工具、资源和提示词。 |
-| 测试       | 保存请求为用例，构建套件，执行、取消和导出运行报告。                      |
-| Wiki       | 预览、添加人工说明，生成 Markdown 和 JSON。                               |
-| 项目设置   | 配置扫描、环境、备份、恢复和历史清理。                                    |
+| 浏览                             | 测试                                         | 复用                             |
+| :------------------------------- | :------------------------------------------- | :------------------------------- |
+| MCP 工具、资源、资源模板和提示词 | HTTP 请求和 MCP 动作，含断言、耗时和错误明细 | 用例、顺序套件与 JSON 报告       |
+| OpenAPI、部分源码定义和仓库技能  | 连续执行、取消、运行历史                     | 本地 Wiki、Markdown 和 JSON 导出 |
 
-每个项目拥有独立 SQLite 数据库，安装目录、应用数据目录和 Git 工作树可以分别管理。桌面应用随包提供运行时。需要在终端调用时，可用同一数据目录下的 [`ifg`](docs/cli.md)。
+独立安装的桌面应用可同时管理多个本机项目。每个项目的数据存放在自己的 SQLite 数据库中。命令行工具 `ifg` 共用项目记录和用例。
 
-[系统和数据目录](docs/workbench.md) · [构建、测试和发行](docs/release.md) · [开发规格](docs/development-spec.md)
+<details>
+<summary>从源码运行</summary>
 
-## 许可证
+使用 Git 和 Node.js LTS。
+
+```sh
+npm ci
+npm run build
+npm start
+```
+
+[开发与验证](CONTRIBUTING.md) · [构建和发行](docs/release.md)
+
+</details>
+
+## 文档与社区
+
+[桌面使用手册](docs/workbench.md) · [MCP 测试指南](docs/mcp.md) · [CLI 参考](docs/cli.md) · [发行记录](https://github.com/qq940500529/ifaceforge/releases)
+
+[Discussions](https://github.com/qq940500529/ifaceforge/discussions) · [提交问题](https://github.com/qq940500529/ifaceforge/issues/new/choose) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md)
 
 [MIT](LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司

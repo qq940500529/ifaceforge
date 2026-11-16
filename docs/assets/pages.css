@@ -1,0 +1,257 @@
+:root {
+  color-scheme: light;
+  --ink: #15233a;
+  --muted: #536782;
+  --blue: #2158ba;
+  --line: #dbe5f1;
+  --panel: #ffffff;
+  --paper: #f4f7fc;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Inter, 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+  line-height: 1.65;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+a {
+  color: var(--blue);
+  text-underline-offset: 0.22em;
+}
+a:focus-visible {
+  outline: 3px solid #80aef8;
+  outline-offset: 4px;
+}
+img {
+  display: block;
+  max-width: 100%;
+}
+.shell {
+  width: min(1250px, calc(100% - 56px));
+  margin-inline: auto;
+}
+
+.site-header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.header-inner,
+.footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-block: 13px;
+}
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  font-weight: 750;
+  text-decoration: none;
+}
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--blue);
+  color: white;
+  font-family: ui-monospace, monospace;
+}
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+nav a {
+  color: var(--muted);
+  font-size: 0.93rem;
+  text-decoration: none;
+}
+nav a:hover,
+nav a:focus-visible {
+  color: var(--blue);
+  text-decoration: underline;
+}
+.nav-github {
+  font-weight: 650;
+}
+
+.hero {
+  min-height: 470px;
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  align-items: center;
+  gap: clamp(26px, 4vw, 64px);
+  padding-block: clamp(38px, 6vw, 96px) 38px;
+}
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4.3vw, 3.65rem);
+  line-height: 1.14;
+  letter-spacing: -0.04em;
+}
+.hero-copy > p {
+  max-width: 35ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  margin: 21px 0;
+}
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.action {
+  padding: 9px 15px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 650;
+}
+.action.primary {
+  background: var(--blue);
+  color: white;
+  border-color: var(--blue);
+}
+.action:hover {
+  text-decoration: underline;
+}
+.hero-copy .platforms {
+  font-size: 0.83rem;
+  max-width: none;
+}
+.hero-figure {
+  margin: 0;
+  min-width: 0;
+}
+.hero-figure img {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px #15315e22;
+}
+.hero-figure figcaption {
+  font-size: 0.81rem;
+  color: var(--muted);
+  margin-top: 12px;
+}
+.guide-section {
+  padding-bottom: 56px;
+}
+.guide-section h2 {
+  font-size: 1.28rem;
+}
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.guide {
+  display: grid;
+  gap: 7px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.guide:hover {
+  border-color: #80aef8;
+}
+.guide strong {
+  display: flex;
+  justify-content: space-between;
+}
+.guide span {
+  color: var(--muted);
+  font-size: 0.91rem;
+}
+.site-footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.doc-content {
+  max-width: 940px;
+  padding-block: 28px 50px;
+  overflow-wrap: anywhere;
+}
+.doc-content h1 {
+  font-size: clamp(1.8rem, 3.5vw, 2.7rem);
+  line-height: 1.26;
+}
+.doc-content h2 {
+  margin-top: 2rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.24em;
+}
+.doc-content img {
+  border-radius: 8px;
+}
+.doc-content table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.doc-content td,
+.doc-content th {
+  border: 1px solid var(--line);
+  padding: 8px 11px;
+  text-align: start;
+  background: var(--panel);
+}
+.doc-content code {
+  font-family: ui-monospace, Consolas, monospace;
+}
+.doc-content :not(pre) > code {
+  background: #e7eef9;
+  border-radius: 4px;
+  padding: 0.12em 0.26em;
+}
+.doc-content pre {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 13px;
+  border-radius: 8px;
+  overflow: auto;
+  color: var(--ink);
+}
+.doc-content blockquote {
+  margin-inline: 0;
+  padding-inline: 13px;
+  border-left: 3px solid #80aef8;
+}
+.doc-content details {
+  background: var(--panel);
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.doc-content summary {
+  cursor: pointer;
+}
+
+@media (max-width: 780px) {
+  .shell {
+    width: min(100% - 32px, 1250px);
+  }
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: auto;
+  }
+  .guide-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

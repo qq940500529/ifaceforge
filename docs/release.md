@@ -1,6 +1,6 @@
 # Build and release
 
-[用户手册](workbench.md) · [开发规格](development-spec.md) · [验证工作流](https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml) · [发行下载](https://github.com/qq940500529/ifaceforge/releases)
+[用户手册](workbench.md) · [开发规格](https://github.com/qq940500529/ifaceforge/blob/main/docs/development-spec.md) · [验证工作流](https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml) · [发行下载](https://github.com/qq940500529/ifaceforge/releases)
 
 ## Build on the target system
 
@@ -43,4 +43,4 @@ The previous technical preview and its acceptance record remain available in the
 
 The initial public repository, npm and web checks on 2026-11-16 found no established same-name API and MCP workbench. Formal trademark clearance remains incomplete. [Initial review record](https://github.com/qq940500529/ifaceforge/blob/v0.1.0/docs/release.md#name-review)
 
-[MIT](../LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司
+[MIT](https://github.com/qq940500529/ifaceforge/blob/main/LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司

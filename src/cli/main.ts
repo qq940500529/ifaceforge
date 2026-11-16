@@ -106,6 +106,8 @@ async function main() {
       output(schemas[id]);
       return;
     }
+    if ([input.file, input.args, input.assertions].filter((value) => value === '-').length > 1)
+      invalid('stdin can only be read once');
     if (typeof input.file === 'string' && !['api import', 'data restore'].includes(name)) {
       input.body =
         name === 'wiki note-put'
@@ -113,9 +115,9 @@ async function main() {
           : readJson(input.file);
     }
     if (typeof input.args === 'string') {
-      if (input.file === '-' && input.args === '-') invalid('stdin can only be read once');
       input.args = input.args.trimStart().startsWith('{') ? parseJson(input.args) : readJson(input.args);
     }
+    if (typeof input.assertions === 'string') input.assertions = readJson(input.assertions);
     registry = new Projects();
     if (name === 'project list') {
       output(registry.list());

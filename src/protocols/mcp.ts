@@ -8,13 +8,35 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Ajv } from 'ajv';
 import { AppError, invalid } from '../app/errors.js';
 import { projectFile } from '../app/files.js';
+import { version } from '../app/platform.js';
 import { Bindings, headerPairs, httpUrl, type Profile } from './variables.js';
+import { resourceTemplate } from './mcp-template.js';
 
 export type McpAction =
   | { type: 'discover' }
   | { type: 'call'; tool: string; arguments: Record<string, unknown> }
   | { type: 'read'; uri: string }
+  | { type: 'template'; uriTemplate: string; arguments: Record<string, unknown> }
   | { type: 'prompt'; name: string; arguments: Record<string, string> };
+
+export function bindMcpAction(action: McpAction, bindings: Bindings) {
+  if (!('arguments' in action)) return bindings.resolve(action) as McpAction;
+  return {
+    ...(bindings.resolve({ ...action, arguments: undefined }) as McpAction),
+    arguments: Object.fromEntries(
+      Object.entries(action.arguments).map(([key, value]) => [key, bindings.resolve(value)]),
+    ),
+  } as McpAction;
+}
+
+export function resolveMcpTarget(action: McpAction) {
+  if (action.type !== 'template') return action;
+  try {
+    return { type: 'read' as const, uri: resourceTemplate(action.uriTemplate).expand(action.arguments) };
+  } catch (error) {
+    invalid(error instanceof Error ? error.message : 'Invalid resource template');
+  }
+}
 
 interface DiscoveryGroup {
   type: 'tool' | 'resource' | 'template' | 'prompt';
@@ -97,7 +119,7 @@ export class McpSession {
     const config = profile.mcp;
     if (!config) invalid('Selected profile does not contain an MCP connection');
     const client = new Client(
-      { name: 'IfaceForge', version: '0.1.0' },
+      { name: 'IfaceForge', version },
       {
         versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2500 } },
       },
@@ -149,6 +171,7 @@ export class McpSession {
       server: this.client.getServerVersion(),
       protocolVersion: this.client.getNegotiatedProtocolVersion(),
       instructions: this.client.getInstructions(),
+      capabilities: this.client.getServerCapabilities(),
     };
   }
 
@@ -173,7 +196,7 @@ export class McpSession {
   }
 
   async execute(
-    action: McpAction,
+    action: Exclude<McpAction, { type: 'template' }>,
     signal?: AbortSignal,
     onProgress?: RequestOptions['onprogress'],
   ): Promise<unknown> {
@@ -183,7 +206,18 @@ export class McpSession {
     let sent = false;
     try {
       if (action.type === 'discover') return await this.inventory(options);
-      if (action.type === 'read') return await this.client.readResource({ uri: action.uri }, options);
+      if (action.type === 'read') {
+        const result = await this.client.readResource({ uri: action.uri }, options);
+        if (isInputRequiredResult(result)) {
+          throw new AppError(
+            'MCP_INPUT_UNSUPPORTED',
+            'The MCP server requested an unsupported client interaction',
+            3,
+            result,
+          );
+        }
+        return result;
+      }
       sent = true;
       const result =
         action.type === 'call'

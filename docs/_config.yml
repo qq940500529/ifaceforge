@@ -1,0 +1,26 @@
+title: IfaceForge
+description: 接口工坊文档
+lang: zh-CN
+repository: qq940500529/ifaceforge
+markdown: kramdown
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+defaults:
+  - scope:
+      path: ''
+      type: pages
+    values:
+      layout: default
+  - scope:
+      path: README.en.md
+      type: pages
+    values:
+      lang: en
+      title: IfaceForge documentation
+exclude:
+  - desktop-plan.md
+  - desktop-ui-audit.md
+  - development-spec.md

@@ -23,6 +23,7 @@ export type Assertion =
   | { type: 'status'; equals: number }
   | { type: 'jsonExists'; pointer: string }
   | { type: 'jsonEquals'; pointer: string; equals: unknown }
+  | { type: 'textContains'; pointer: string; text: string }
   | { type: 'responseSchema' }
   | { type: 'toolDiscovered'; name: string }
   | { type: 'toolError'; equals: boolean }
@@ -37,13 +38,22 @@ export interface Check {
 }
 
 export function compare(assertion: Assertion, body: unknown): Check | undefined {
-  if (assertion.type !== 'jsonExists' && assertion.type !== 'jsonEquals') return;
+  if (assertion.type !== 'jsonExists' && assertion.type !== 'jsonEquals' && assertion.type !== 'textContains')
+    return;
   const actual = jsonPointer(body, assertion.pointer);
-  const expected = assertion.type === 'jsonEquals' ? assertion.equals : 'present';
+  const expected =
+    assertion.type === 'textContains'
+      ? assertion.text
+      : assertion.type === 'jsonEquals'
+        ? assertion.equals
+        : 'present';
   return {
     type: assertion.type,
     passed:
-      actual !== undefined && (assertion.type === 'jsonExists' || stableJson(actual) === stableJson(expected)),
+      actual !== undefined &&
+      (assertion.type === 'textContains'
+        ? typeof actual === 'string' && actual.includes(assertion.text)
+        : assertion.type === 'jsonExists' || stableJson(actual) === stableJson(expected)),
     actual,
     expected,
     details: { pointer: assertion.pointer },

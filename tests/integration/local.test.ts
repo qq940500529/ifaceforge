@@ -179,6 +179,13 @@ for (const transport of ['stdio', 'streamableHttp'] as const) {
           { id: 'resource', type: 'read', uri: 'task://42' },
           { id: 'prompt', type: 'prompt', name: 'task-summary', arguments: { title: '{{text}}' } },
           { id: 'error', type: 'call', tool: 'reject', arguments: {} },
+          {
+            id: 'template',
+            type: 'template',
+            uriTemplate: 'task://{id}',
+            arguments: { id: '43' },
+            assertions: [{ type: 'textContains', pointer: '/contents/0/text', text: 'Synthetic task' }],
+          },
         ],
       };
       const result = check(
@@ -190,6 +197,92 @@ for (const transport of ['stdio', 'streamableHttp'] as const) {
       expect(result.steps[3].result.contents[0].text).toContain('Sample task');
       expect(result.steps[4].result.messages[0].content.text).toContain('connected');
       expect(result.steps[5].result.isError).toBe(true);
+      expect(result.steps[6]).toMatchObject({
+        status: 'passed',
+        request: { type: 'template', uri: 'task://43' },
+        checks: [{ passed: true, expected: 'Synthetic task' }],
+      });
+      if (!legacy) {
+        const saved = [
+          {
+            id: 'tool-case',
+            request: { type: 'call', tool: 'echo', arguments: { value: 'case result' } },
+            assertions: [{ type: 'jsonEquals', pointer: '/value', equals: 'case result' }],
+          },
+          {
+            id: 'resource-case',
+            request: { type: 'read', uri: 'task://42' },
+            assertions: [{ type: 'textContains', pointer: '/contents/0/text', text: 'Sample task' }],
+          },
+          {
+            id: 'template-case',
+            request: { type: 'template', uriTemplate: 'task://{id}', arguments: { id: '43' } },
+            assertions: [{ type: 'jsonEquals', pointer: '/contents/0/uri', equals: 'task://43' }],
+          },
+          {
+            id: 'prompt-case',
+            request: { type: 'prompt', name: 'task-summary', arguments: { title: 'shared case' } },
+            assertions: [{ type: 'textContains', pointer: '/messages/0/content/text', text: 'shared case' }],
+          },
+        ];
+        for (const item of saved)
+          check(
+            await ifg(
+              root,
+              'case',
+              'put',
+              '--file',
+              write(item.id + '.json', {
+                schemaVersion: 1,
+                kind: 'mcp',
+                profile: 'sample',
+                name: item.id,
+                ...item,
+              }),
+            ),
+          );
+        check(
+          await ifg(
+            root,
+            'suite',
+            'put',
+            '--file',
+            write('mcp-suite.json', {
+              schemaVersion: 1,
+              id: 'mcp-suite',
+              name: 'MCP suite',
+              caseIds: saved.map((item) => item.id),
+            }),
+          ),
+        );
+        expect(
+          check(await ifg(root, 'test', 'run', '--suite', 'mcp-suite')).steps.map(
+            (step: { status: string }) => step.status,
+          ),
+        ).toEqual(Array(4).fill('passed'));
+        const assertions = write('assertions.json', [
+          { type: 'jsonEquals', pointer: '/value', equals: 'expected' },
+        ]);
+        const failed = await ifg(
+          root,
+          'mcp',
+          'call',
+          'echo',
+          '--profile',
+          'sample',
+          '--args',
+          '{"value":"actual"}',
+          '--assertions',
+          assertions,
+        );
+        expect(failed.exit).toBe(1);
+        expect(failed.result.data.steps[0].checks[0]).toMatchObject({
+          passed: false,
+          actual: 'actual',
+          expected: 'expected',
+        });
+        expect(check(await ifg(root, 'run', 'list', '--kind', 'mcp', '--profile', 'different')).total).toBe(0);
+      }
       if (transport === 'stdio') {
         const pid = result.steps[1].result.structuredContent.pid;
         expect(result.steps[2].result.structuredContent.pid).toBe(pid);

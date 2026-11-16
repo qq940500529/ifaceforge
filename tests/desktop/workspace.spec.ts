@@ -158,6 +158,7 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
 });
 
 test('uses desktop controls for source, requests, MCP, tests, Wiki and project data', async ({}, info) => {
+  test.setTimeout(150_000);
   const sample = fixture('express');
   const service = createServer(taskApp());
   const origin = await address(service);
@@ -295,31 +296,87 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await navigate('MCP');
     await page.getByRole('combobox', { name: 'Profile', exact: true }).click();
     await page.getByRole('option', { name: 'Test environment', exact: true }).click();
-    await page.locator('summary').filter({ hasText: 'Details' }).first().click();
     await button('Connect').click();
-    await button('Discover').click();
+    await expect(button('echo')).toBeVisible();
+    const serviceDetails = page.locator('summary').filter({ hasText: /^Service details$/ });
+    await serviceDetails.click();
+    await expect(serviceDetails.locator('..')).toHaveAttribute('open', '');
+    await serviceDetails.click();
+    await page.getByRole('textbox', { name: 'Search MCP directory' }).fill('structured JSON');
     await button('echo').click();
+    await expect(button('slow')).not.toBeVisible();
+    await page.getByRole('textbox', { name: 'Search MCP directory' }).clear();
+    await expect(button('slow')).toBeVisible();
+    await page.getByRole('tab', { name: 'Details', exact: true }).click();
+    const outputSchema = page.locator('summary').filter({ hasText: /^Output schema$/ });
+    await outputSchema.click();
+    await expect(outputSchema.locator('..')).toHaveAttribute('open', '');
+    await snapshot('mcp-details');
+    await outputSchema.click();
+    await page.getByRole('tab', { name: 'Test', exact: true }).click();
     await page.getByRole('textbox', { name: 'value *', exact: true }).fill('desktop tool result');
+    await button('Add assertion').click();
+    const pointer = page.getByRole('combobox', { name: 'JSON Pointer', exact: true });
+    await pointer.fill('/value');
+    await page.getByRole('textbox', { name: 'Expected value', exact: true }).fill('"different"');
     await button('Call tool').click();
     await expect(
-      page.locator('pre.code').filter({ hasText: '"value": "desktop tool result"' }).first(),
+      page.locator('pre.code:visible').filter({ hasText: '"expected": "different"' }).first(),
     ).toBeVisible();
+    await page.getByRole('textbox', { name: 'Expected value', exact: true }).fill('"desktop tool result"');
+    await button('Call tool').click();
+    await expect(
+      page.locator('pre.code:visible').filter({ hasText: '"value": "desktop tool result"' }).first(),
+    ).toBeVisible();
+    await expect(page.locator('.mcp-inspector').getByText('Passed', { exact: true }).first()).toBeVisible();
+    await page.getByRole('tab', { name: 'History', exact: true }).click();
+    await expect(page.locator('.mcp-inspector .list-button')).toHaveCount(2);
+    await page.locator('.mcp-inspector .list-button').first().click();
+    await expect(button('Export JSON')).toBeVisible();
+    await page.getByRole('tab', { name: 'Test', exact: true }).click();
     await snapshot('mcp-tool');
+    await page.locator('.mcp-layout:visible').screenshot({
+      path: info.outputPath('mcp-showcase.png'),
+      style: '.desktop-header { visibility: hidden !important }',
+      scale: 'css',
+      animations: 'disabled',
+    });
+    const saveMcpCase = async (id: string) => {
+      await button('Save as case').click();
+      await page.getByRole('textbox', { name: 'Case ID' }).fill(id);
+      await page.getByRole('textbox', { name: 'Case name' }).fill(id);
+      await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+      await expect(page.getByRole('dialog')).not.toBeVisible();
+    };
+    await saveMcpCase('mcp-echo');
     await button('Disconnect').click();
     await expect(button('Connect')).toBeVisible();
     await page.getByRole('combobox', { name: 'Profile', exact: true }).click();
     await page.getByRole('option', { name: 'Stdio environment', exact: true }).click();
     await button('Connect').click();
     await button('Discover').click();
-    await page.getByRole('tab', { name: 'Resources', exact: true }).click();
+    await button('Resources').click();
     await button('task').click();
     await button('Read resource').click();
     await expect(page.getByText('Sample task 42', { exact: false }).first()).toBeVisible();
-    await page.getByRole('tab', { name: 'Prompts', exact: true }).click();
+    await saveMcpCase('mcp-resource');
+    await button('sample-image').click();
+    await button('Read resource').click();
+    await expect(page.getByRole('img', { name: 'MCP response image' })).toBeVisible();
+    await button('Resource templates').click();
+    await button('task-template').click();
+    await expect(button('Read resource')).toBeDisabled();
+    await page.getByRole('textbox', { name: 'id *', exact: true }).fill('43');
+    await expect(page.getByRole('textbox', { name: 'Resource URI', exact: true })).toHaveValue('task://43');
+    await button('Read resource').click();
+    await expect(page.getByText('Synthetic task', { exact: true }).first()).toBeVisible();
+    await saveMcpCase('mcp-template');
+    await button('Prompts').click();
     await button('task-summary').click();
-    await page.getByRole('textbox', { name: 'Arguments (JSON)', exact: true }).fill('{"title":"desktop audit"}');
+    await page.getByRole('textbox', { name: 'title *', exact: true }).fill('desktop audit');
     await button('Get prompt').click();
     await expect(page.getByText('Summarize desktop audit', { exact: false }).first()).toBeVisible();
+    await saveMcpCase('mcp-prompt');
     await button('Disconnect').click();
 
     await navigate('Wiki');
@@ -388,7 +445,7 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await choose(app, sample.root);
     await header.getByRole('button', { name: 'Add project' }).click();
     await expect(page.locator('.project-path:visible')).toHaveText(sample.root);
-    expect((await ifg(sample.root, 'case', 'list')).result.data.total).toBe(1);
+    expect((await ifg(sample.root, 'case', 'list')).result.data.total).toBe(5);
     await header.getByRole('button', { name: 'Manage projects' }).click();
     await manager.getByRole('button', { name: 'Delete app data' }).click();
     await page
@@ -404,5 +461,70 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await close(mcp);
     await close(service);
     sample.destroy();
+  }
+});
+
+test('keeps live MCP targets, drafts and results within their project', async ({}, info) => {
+  const first = fixture('express');
+  const second = fixture('fastapi');
+  const server = mcpHttp();
+  const url = (await address(server)) + '/mcp';
+  const app = await boot(first.data);
+  try {
+    const page = await app.firstWindow();
+    const header = page.locator('.desktop-header');
+    const visible = page.locator('.mcp-workbench:visible');
+    const argument = visible.getByRole('textbox', { name: 'value *', exact: true });
+    async function addAndTest(root: string, value: string) {
+      await choose(app, root);
+      await header.getByRole('button', { name: 'Add project', exact: true }).click();
+      await expect(page.locator('.project-path:visible')).toHaveText(root);
+      const profile = await page.evaluate(async (endpoint) => {
+        const state = await window.ifaceforge!.state();
+        if (!state.ok || !state.data.selected) throw new Error('Project not selected');
+        return window.ifaceforge!.command(state.data.selected, 'profile put', {
+          body: {
+            schemaVersion: 1,
+            id: 'same',
+            name: 'Shared service',
+            mcp: { transport: 'streamableHttp', url: endpoint },
+          },
+        });
+      }, url);
+      expect(profile.ok).toBe(true);
+      await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
+      await visible.getByRole('combobox', { name: 'Profile', exact: true }).click();
+      await page.getByRole('option', { name: 'Shared service', exact: true }).click();
+      await visible.getByRole('button', { name: 'Connect', exact: true }).click();
+      await visible.getByRole('button', { name: 'echo', exact: true }).click();
+      await argument.fill(value);
+      await visible.getByRole('button', { name: 'Call tool', exact: true }).click();
+      await expect(visible.locator('pre.code:visible').filter({ hasText: value }).first()).toBeVisible();
+    }
+    await addAndTest(first.root, 'first project input');
+    await addAndTest(second.root, 'second project input');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(600, 680));
+    const filters = visible.getByRole('group', { name: 'MCP capability types' });
+    for (const name of ['Tools', 'Resources', 'Resource templates', 'Prompts']) {
+      const control = filters.getByRole('button', { name, exact: true });
+      await control.click();
+      await expect(control).toHaveAttribute('aria-pressed', 'true');
+      expect(await control.evaluate((element) => element.getBoundingClientRect().right <= innerWidth)).toBe(true);
+    }
+    await filters.getByRole('button', { name: 'Tools', exact: true }).click();
+    await filters.screenshot({ path: info.outputPath('mcp-narrow-categories.png'), scale: 'css' });
+    await header.getByRole('combobox', { name: 'Switch project', exact: true }).click();
+    await page.getByRole('option', { name: basename(first.root), exact: true }).click();
+    await expect(page.locator('.project-path:visible')).toHaveText(first.root);
+    await expect(argument).toHaveValue('first project input');
+    await expect(
+      visible.locator('pre.code:visible').filter({ hasText: 'first project input' }).first(),
+    ).toBeVisible();
+    await expect(visible.locator('pre.code:visible').filter({ hasText: 'second project input' })).toHaveCount(0);
+  } finally {
+    await app.close();
+    await close(server);
+    first.destroy();
+    second.destroy();
   }
 });

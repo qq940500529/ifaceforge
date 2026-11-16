@@ -74,7 +74,22 @@ const request = {
   ),
   oneOf: [{ required: ['url'] }, { required: ['path'] }],
 };
-const mcpRequest = object({ tool: text, arguments: map({}) }, ['tool', 'arguments']);
+const promptArg = { anyOf: [{ type: 'string' }, env] };
+const mcpActions = {
+  discover: {},
+  call: { tool: text, arguments: map({}) },
+  read: { uri: text },
+  template: { uriTemplate: text, arguments: map({}) },
+  prompt: { name: text, arguments: map(promptArg) },
+};
+const mcpRequest = {
+  oneOf: [
+    object({ tool: text, arguments: map({}) }, ['tool', 'arguments']),
+    ...Object.entries(mcpActions).map(([type, params]) =>
+      object({ type: { const: type }, ...params }, ['type', ...Object.keys(params)]),
+    ),
+  ],
+};
 const assertion = {
   oneOf: [
     object({ type: { const: 'status' }, equals: { type: 'integer', minimum: 100, maximum: 599 } }, [
@@ -83,16 +98,13 @@ const assertion = {
     ]),
     object({ type: { const: 'jsonExists' }, pointer }, ['type', 'pointer']),
     object({ type: { const: 'jsonEquals' }, pointer, equals: {} }, ['type', 'pointer', 'equals']),
+    object({ type: { const: 'textContains' }, pointer, text }, ['type', 'pointer', 'text']),
     object({ type: { const: 'responseSchema' } }, ['type']),
     object({ type: { const: 'toolDiscovered' }, name: text }, ['type', 'name']),
     object({ type: { const: 'toolError' }, equals: { type: 'boolean' } }, ['type', 'equals']),
     object({ type: { const: 'fileExists' }, path: text }, ['type', 'path']),
   ],
 };
-
-function action(type: string, params: Record<string, object>) {
-  return object({ id, type: { const: type }, extract, ...params }, ['id', 'type', ...Object.keys(params)]);
-}
 
 export const schemas: Record<string, object> = {
   config: document({ sources: scan.sources, exclude: scan.exclude }, []),
@@ -131,12 +143,13 @@ export const schemas: Record<string, object> = {
     {
       steps: {
         ...array({
-          oneOf: [
-            action('discover', {}),
-            action('call', { tool: text, arguments: map({}) }),
-            action('read', { uri: text }),
-            action('prompt', { name: text, arguments: map(text) }),
-          ],
+          oneOf: Object.entries(mcpActions).map(([type, params]) =>
+            object({ id, type: { const: type }, extract, assertions: array(assertion), ...params }, [
+              'id',
+              'type',
+              ...Object.keys(params),
+            ]),
+          ),
         }),
         minItems: 1,
       },
