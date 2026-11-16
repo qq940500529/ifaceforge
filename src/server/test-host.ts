@@ -47,7 +47,7 @@ async function close() {
   server.close(() => {
     db.close();
     registry.close();
-    if (process.connected) process.disconnect();
+    if (process.connected) process.disconnect?.();
   });
 }
 process.on('message', (message) => {
