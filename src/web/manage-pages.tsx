@@ -370,10 +370,11 @@ export function WikiPage() {
               )}
             </>
           )}
-          <Button loading={busy} onClick={() => void operation(load)}>
+          <Button data-testid="wiki-preview" loading={busy} onClick={() => void operation(load)}>
             {t('preview')}
           </Button>
           <Button
+            data-testid="wiki-build"
             type="primary"
             loading={busy}
             onClick={() =>
@@ -387,9 +388,14 @@ export function WikiPage() {
           >
             {t('build')}
           </Button>
-          {preview && <Button onClick={() => download('catalog.json', preview.catalog)}>{t('export')}</Button>}
+          {preview && (
+            <Button data-testid="wiki-export" onClick={() => download('catalog.json', preview.catalog)}>
+              {t('export')}
+            </Button>
+          )}
           {activeExport && (
             <Button
+              data-testid="wiki-open"
               onClick={() =>
                 void operation(async () => {
                   await command('wiki open', { id: activeExport.id });

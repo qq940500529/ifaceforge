@@ -318,7 +318,7 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await navigate('Wiki');
     await choose(app, exportPath);
     await button('Choose folder').click();
-    const previewWiki = page.locator('.main:visible .toolbar button').filter({ hasText: /^Preview Wiki$/ });
+    const previewWiki = page.getByTestId('wiki-preview');
     await expect(previewWiki).toBeVisible();
     await previewWiki.click();
     await expect(page.getByRole('heading', { name: 'IfaceForge Wiki' })).toBeVisible();
@@ -327,14 +327,14 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await expect(changes.locator('..')).toHaveAttribute('open', '');
     await snapshot('wiki-changes');
     await changes.click();
-    await button('Generate Wiki').click();
-    await expect(button('Open export directory')).toBeVisible();
+    await page.getByTestId('wiki-build').click();
+    await expect(page.getByTestId('wiki-open')).toBeVisible();
     expect(existsSync(join(exportPath, 'catalog.json'))).toBe(true);
     const jsonPath = join(sample.data, 'catalog-download.json');
     await app.evaluate(({ dialog }, path) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
     }, jsonPath);
-    await button('Export JSON').click();
+    await page.getByTestId('wiki-export').click();
     await expect.poll(() => existsSync(jsonPath)).toBe(true);
     expect(JSON.parse(readFileSync(jsonPath, 'utf8')).items.length).toBeGreaterThan(0);
 
