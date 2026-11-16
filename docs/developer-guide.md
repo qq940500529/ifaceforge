@@ -10,6 +10,8 @@
 - 为操作提供稳定的 `operationId`、HTTP 方法、路径、参数、请求体和成功及错误响应。给分页、缺少参数、无权限等情况加入可验证示例。
 - 让相对 `$ref` 指向同仓库、同提交的文件。维护不同分支时，声明和引用一并提交。对于 Swagger 历史格式，保留原始资源列表和资源声明。
 - 服务提供 OpenAPI 地址时，可在 API 面板直接导入。Express 与 FastAPI 源码识别适合校对路由位置。任意语言都可以通过 OpenAPI 声明提供完整定义。
+- Express 扫描从框架创建的应用、路由器与路由链确认服务端注册。可识别的 `fetch`、Axios 和客户端工厂调用作为调用证据，能匹配接口时附在对应条目的来源里；未匹配的调用可在扫描诊断中查看。
+- 自定义 Python HTTP 分发、动态注册等会在可识别时生成覆盖诊断。`catalog list --kind api --json` 的 `coverage` 写明发现方式和诊断数量，`guide validate --json` 列出具体位置。自定义路由可用 OpenAPI 声明或运行时契约补齐。
 
 [HTTP 测试项目](https://github.com/qq940500529/ifaceforge/tree/main/fixtures/express) · [OpenAPI 版本索引](https://spec.openapis.org/oas/)
 

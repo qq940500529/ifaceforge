@@ -1,5 +1,5 @@
 export type Kind = 'api' | 'mcp' | 'skill';
-export type Origin = 'declaration' | 'source' | 'runtime';
+export type Origin = 'declaration' | 'source' | 'runtime' | 'call-site';
 export interface Observation {
   id: string;
   kind: Kind;
@@ -15,6 +15,7 @@ export interface Observation {
 export interface Diagnostic {
   path?: string;
   line?: number;
+  severity?: 'info' | 'warning' | 'error';
   code: string;
   message: string;
 }
@@ -33,6 +34,7 @@ export interface Snapshot {
   created: string;
   commit: string | null;
   source?: 'git' | 'worktree';
+  scannerVersion?: number;
   worktree: string;
   scope: string;
   complete: boolean;

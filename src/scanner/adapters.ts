@@ -4,6 +4,7 @@ import { digest, projectFile, protectedSource, type ScanSource } from '../app/fi
 import type { Adapter } from '../app/config.js';
 import { apiId, mcpId, type Diagnostic, type Observation } from './model.js';
 import { scanMcpSource } from './mcp-discovery.js';
+import { scanExpressSource } from './express.js';
 import { mapping, yamlDocument } from './openapi.js';
 
 export function parseSkill(
@@ -117,9 +118,63 @@ export function parseMcpConfig(
 }
 
 const extensions = /\.(?:[cm]?[jt]sx?)$/i;
-const javascriptPattern =
-  /\b[\w$.]+\.(get|post|put|patch|delete|options|head|all|use)\s*\(\s*(['"])([^'"\r\n]+)\2/;
 const pythonPattern = /^\s*@[\w.]+\.(get|post|put|patch|delete|options|head|trace)\s*\(\s*(['"])([^'"\r\n]+)\2/;
+
+function pythonSource(
+  path: string,
+  text: string,
+  service: string,
+  diagnostics: Diagnostic[],
+  checkpoint?: () => void,
+) {
+  const observations: Observation[] = [];
+  const lines = text.split(/\r?\n/);
+  const handler = lines.findIndex((line) =>
+    /^\s*(?:class\s+\w+\([^)]*\b(?:BaseHTTPRequestHandler|SimpleHTTPRequestHandler)\b|def\s+do_(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s*\()/.test(
+      line,
+    ),
+  );
+  const dispatch = /\b([A-Za-z_]\w*)\.command\b/.exec(text);
+  if (handler >= 0 || (dispatch && new RegExp('\\b' + dispatch[1] + '\\.path\\b').test(text))) {
+    const dispatchLine = lines.findIndex((line) => /^\s*(?:async\s+)?def\s+\w*dispatch\w*\s*\(/.test(line));
+    const definition = dispatchLine >= 0 ? dispatchLine : handler;
+    diagnostics.push({
+      path,
+      line: definition >= 0 ? definition + 1 : text.slice(0, dispatch!.index).split('\n').length,
+      code: 'HTTP_HANDLER_UNRESOLVED',
+      message: 'Custom Python HTTP dispatch has route branches outside static FastAPI discovery',
+    });
+  }
+  if (!/^\s*(?:from\s+fastapi(?:\.\w+)*\s+import\b|import\s+fastapi\b)/m.test(text)) return observations;
+  for (const [index, line] of lines.entries()) {
+    if (index % 256 === 0) checkpoint?.();
+    const match = pythonPattern.exec(line);
+    if (!match) {
+      if (/^\s*@\w+\.(?:get|post|put|patch|delete)\(/.test(line))
+        diagnostics.push({
+          path,
+          line: index + 1,
+          code: 'DYNAMIC_ROUTE',
+          message: 'FastAPI registration has a non-literal or multiline path',
+        });
+      continue;
+    }
+    const [, method, , route] = match;
+    if (route.startsWith('/'))
+      observations.push({
+        id: apiId(service, method, route),
+        kind: 'api',
+        service,
+        name: method.toUpperCase() + ' ' + route,
+        summary: '',
+        origin: 'source',
+        path,
+        line: index + 1,
+        definition: { method, path: route, adapter: 'fastapi' },
+      });
+  }
+  return observations;
+}
 
 export function scanSource(
   path: string,
@@ -130,54 +185,13 @@ export function scanSource(
   checkpoint?: () => void,
 ) {
   const observations: Observation[] = [];
-  const javascript = extensions.test(path);
-  const python = /\.py$/i.test(path);
-  const supported = [
-    javascript && adapters.includes('express') && { pattern: javascriptPattern, name: 'express' },
-    python && adapters.includes('fastapi') && { pattern: pythonPattern, name: 'fastapi' },
-  ].filter((entry) => entry !== false);
-  let inComment = false;
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
-    if (index % 256 === 0) checkpoint?.();
-    const trimmed = line.trimStart();
-    if (javascript && trimmed.startsWith('/*')) inComment = !trimmed.includes('*/');
-    if (inComment || /^(?:\/\/|#|\/\*)/.test(trimmed)) {
-      if (inComment && trimmed.includes('*/')) inComment = false;
-      continue;
-    }
-    for (const { pattern, name: adapter } of supported) {
-      const match = pattern.exec(line);
-      if (!match) {
-        if (
-          (adapter === 'fastapi' && /^@\w+\.(?:get|post|put|patch|delete)\(/.test(trimmed)) ||
-          (adapter === 'express' && /\b(?:app|router)\.(?:get|post|put|patch|delete)\(/.test(trimmed))
-        ) {
-          diagnostics.push({
-            path,
-            code: 'DYNAMIC_ROUTE',
-            message: adapter + ' dynamic or multiline registration at ' + (index + 1),
-          });
-        }
-        continue;
-      }
-      const [, method, , value] = match;
-      if (value.startsWith('/') && method !== 'use' && method !== 'all') {
-        const route = value.replace(/:([\w]+)/g, '{$1}');
-        observations.push({
-          id: apiId(service, method, route),
-          kind: 'api',
-          service,
-          name: method.toUpperCase() + ' ' + route,
-          summary: '',
-          origin: 'source',
-          path,
-          line: index + 1,
-          definition: { method, path: route, adapter },
-        });
-      }
-    }
+  if (/\.py$/i.test(path) && adapters.includes('fastapi'))
+    return pythonSource(path, text, service, diagnostics, checkpoint);
+  if (extensions.test(path)) {
+    if (adapters.includes('express'))
+      observations.push(...scanExpressSource(path, text, service, diagnostics, checkpoint));
+    if (adapters.includes('mcp-typescript'))
+      observations.push(...scanMcpSource(path, text, service, diagnostics, checkpoint));
   }
-  if (javascript && adapters.includes('mcp-typescript'))
-    observations.push(...scanMcpSource(path, text, service, diagnostics, checkpoint));
   return observations;
 }

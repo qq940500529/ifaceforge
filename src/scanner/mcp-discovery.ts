@@ -1,8 +1,8 @@
-import { parse } from '@babel/parser';
 import type { Node } from '@babel/types';
 import type { Diagnostic, Observation } from './model.js';
 import { mcpId } from './model.js';
 import { mapping } from './openapi.js';
+import { parseJavaScript } from './javascript.js';
 
 const registrations = {
   tool: 'tool',
@@ -121,13 +121,7 @@ export function scanMcpSource(
     return [];
   let program;
   try {
-    program = parse(text, {
-      sourceType: 'unambiguous',
-      plugins: [
-        /\.(?:[cm]?ts|tsx)$/i.test(path) ? 'typescript' : 'jsx',
-        ...(/\.tsx$/i.test(path) ? ['jsx' as const] : []),
-      ],
-    }).program;
+    program = parseJavaScript(path, text).program;
   } catch (error) {
     diagnostics.push({ path, code: 'MCP_SOURCE_PARSE', message: (error as Error).message });
     return [];

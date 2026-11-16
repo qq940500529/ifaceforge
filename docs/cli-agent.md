@@ -29,6 +29,8 @@ ifg source show --project PROJECT --ref TARGET --path "openapi.yaml" --json
 
 用 `data.items[]` 获取条目 ID，再用 `catalog show` 或 `skill show` 获取定义。保留 Git SHA、来源路径、行号和诊断。对比前后都使用同一项目 ID。初始化、刷新和翻页只读取 Git 元数据。扫描只处理当前选择的提交。MCP 离线清单可提供声明，运行时能力用 `mcp discover` 确认。
 
+阅读 API 目录时，核对 `data.coverage.unresolved` 和 `guide validate --ref TARGET --json` 的覆盖诊断。`call-site` 表示客户端调用，可用于溯源。自定义 Python HTTP 分发和动态注册可以通过 OpenAPI 声明补齐。
+
 ## 执行和跟踪测试
 
 ```text

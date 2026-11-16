@@ -6,6 +6,26 @@ const files = { en: 'developer-guide.en.md', 'zh-CN': 'developer-guide.md' } as 
 const guideFile = (name: string) => readFileSync(new URL('../../docs/' + name, import.meta.url), 'utf8');
 export const cliGuide = () => guideFile('cli-agent.md');
 export const guideRules = {
+  HTTP_CALL_SITE: {
+    severity: 'info',
+    category: 'evidence',
+    fix: 'Match the call to a server route or contract to verify the endpoint.',
+  },
+  HTTP_HANDLER_UNRESOLVED: {
+    severity: 'warning',
+    category: 'coverage',
+    fix: 'Publish OpenAPI for custom HTTP route dispatch or import the running service contract.',
+  },
+  EXPRESS_SOURCE_PARSE: {
+    severity: 'warning',
+    category: 'coverage',
+    fix: 'Publish OpenAPI for declarations whose source file could not be parsed.',
+  },
+  DYNAMIC_ROUTE: {
+    severity: 'warning',
+    category: 'coverage',
+    fix: 'Publish OpenAPI for dynamic or unsupported route registration.',
+  },
   SKILL_METADATA: {
     severity: 'error',
     category: 'specification',
@@ -68,7 +88,7 @@ export function guideDiagnostics(snapshot: Snapshot) {
       rule: issue.code,
       line: issue.line ?? (Number(/\bline (\d+)/.exec(issue.message)?.[1]) || null),
       ...guideRules[issue.code as keyof typeof guideRules],
-      severity: guideRules[issue.code as keyof typeof guideRules]?.severity ?? 'warning',
+      severity: guideRules[issue.code as keyof typeof guideRules]?.severity ?? issue.severity ?? 'warning',
     })),
   };
 }

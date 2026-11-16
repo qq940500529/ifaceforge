@@ -1,7 +1,16 @@
 import { AppError, invalid } from './errors.js';
 import { safeProfile } from './profiles.js';
 import { apiFragment, importApi, requestDraft, type Assertion } from './api.js';
-import { activeSnapshot, diffScans, getEntity, getSnapshot, page, scanProject, searchCatalog } from './catalog.js';
+import {
+  activeSnapshot,
+  diffScans,
+  getEntity,
+  getSnapshot,
+  page,
+  scanProject,
+  scannerVersion,
+  searchCatalog,
+} from './catalog.js';
 import { checkConfig, effectiveConfig, type Locale } from './config.js';
 import { sourceText, projectFile, protectedSource } from './files.js';
 import { commitSource, filePatch, gitCommit, gitLog, gitRefs, gitRelation, resolveCommit } from './git-history.js';
@@ -148,8 +157,12 @@ export class Workbench {
         ]);
         return gitRelation(project.root, base, target);
       }
-      case 'git view':
-        return repository.setting<BrowseVersion>('gitView') ?? null;
+      case 'git view': {
+        const view = repository.setting<BrowseVersion>('gitView');
+        return view && repository.get<Snapshot>('git_snapshots', view.snapshot)?.scannerVersion === scannerVersion
+          ? view
+          : null;
+      }
       case 'git browse': {
         const view = input.ref ? await browseVersion(project, repository, input.ref, { full: input.full }) : null;
         repository.set('gitView', view);

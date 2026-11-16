@@ -10,6 +10,8 @@ Use the programming language of your choice. The scanner reads standard descript
 - Give operations stable IDs, methods and paths. Define parameters, request bodies, successes and errors. Include examples for pagination, invalid input and access failures.
 - Keep relative references within the same repository revision. For early Swagger descriptions, commit both the resource listing and the referenced declarations.
 - Import a running service's OpenAPI document from its HTTP URL. The Express and FastAPI source adapters add route locations. Standard descriptions work across languages.
+- Express discovery follows bindings created by the framework's application and router factories. Recognized `fetch`, Axios and client factory calls appear as call evidence. Matching calls attach to the endpoint's sources; unmatched calls appear in diagnostics.
+- Discovery reports coverage gaps for recognizable custom Python HTTP dispatch and dynamic registration. `catalog list --kind api --json` includes a `coverage` summary, and `guide validate --json` reports locations. Publish or import an OpenAPI definition for those routes.
 
 [HTTP test project](https://github.com/qq940500529/ifaceforge/tree/main/fixtures/express) · [OpenAPI releases](https://spec.openapis.org/oas/)
 

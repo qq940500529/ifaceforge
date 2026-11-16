@@ -100,8 +100,14 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
     await header.getByRole('button', { name: 'Add project' }).click();
     await expect(page.locator('.project-path:visible')).toHaveText(first.root);
 
-    // A large tracked source holds the real scanner open long enough on fast runners.
-    writeFileSync(join(firstDir, 'routes.js'), "app.get('/cancellable', handler);\n".repeat(180_000));
+    // Track several sources so cancellation can reach the scanner before it saves its result.
+    for (let index = 0; index < 4; index++) {
+      writeFileSync(
+        join(firstDir, 'routes-' + index + '.js'),
+        "import express from 'express'; const app = express();\n" +
+          "app.get('/cancellable', handler);\n".repeat(60_000),
+      );
+    }
     git(first.root, ['add', '.']);
     await page.getByRole('button', { name: 'Scan project', exact: true }).click();
     await expect(page.locator('.scan-panel:visible')).toBeVisible();
@@ -595,6 +601,14 @@ test('browses and compares selected versions with responsive graph controls', as
       '-m',
       body,
     ]);
+  const config = JSON.parse(readFileSync(join(sample.root, '.ifaceforge.json'), 'utf8'));
+  config.sources[0].adapters.push('fastapi');
+  sample.write('.ifaceforge.json', config);
+  writeFileSync(
+    join(sample.root, 'custom-handler.py'),
+    'from urllib.parse import urlsplit\ndef dispatch(handler):\n    route = urlsplit(handler.path)\n    if handler.command != "GET":\n        raise ValueError(route)\n',
+  );
+  git(sample.root, ['add', '.ifaceforge.json', 'custom-handler.py']);
   commit('Initial API definitions', 'Original contract and helper modules.');
   const common = git(sample.root, ['rev-parse', 'HEAD']).trim();
   for (let index = 0; index < 52; index++) git(sample.root, ['branch', 'team/topic-' + index]);
@@ -639,13 +653,15 @@ test('browses and compares selected versions with responsive graph controls', as
     const button = (name: string) => page.getByRole('button', { name, exact: true });
     const field = (name: string) => page.getByRole('combobox', { name, exact: true });
     const option = async (name: string, label: RegExp) => {
-      await field(name).click();
-      await field(name).fill(label.source.replace(/^\^/, ''));
-      await page
-        .locator('.ant-select-dropdown:visible .ant-select-item-option')
-        .filter({ hasText: label })
-        .first()
-        .click();
+      const control = field(name);
+      await control.click();
+      await control.fill(label.source.replace(/^\^/, ''));
+      const listId = await control.getAttribute('aria-controls');
+      const dropdown = page
+        .locator('.ant-select-dropdown:visible')
+        .filter({ has: page.locator('[id="' + listId + '"]') });
+      await expect(dropdown.locator('.ant-select-item-option').filter({ hasText: label })).toBeVisible();
+      await control.press('Enter');
     };
     const evidence = (name: string) =>
       page.screenshot({
@@ -757,6 +773,15 @@ test('browses and compares selected versions with responsive graph controls', as
     await expect(page.locator('.version-browse').getByText(feature.slice(0, 8), { exact: true })).toBeVisible();
     await page.getByRole('menuitem', { name: 'Catalog', exact: true }).click();
     await expect(page.getByRole('button', { name: /GET \/version-check/ })).toBeVisible();
+    await expect(page.getByText('API source coverage', { exact: true })).toBeVisible();
+    await page
+      .locator('summary')
+      .filter({ hasText: /^\d+ route diagnostics$/ })
+      .click();
+    await page.getByRole('button', { name: /^custom-handler\.py:/ }).click();
+    const coverageSource = page.getByRole('dialog', { name: /^custom-handler\.py:/ });
+    await expect(coverageSource.getByText(/handler\.command/)).toBeVisible();
+    await coverageSource.getByRole('button', { name: 'Close' }).click();
     await expect(button('Compare')).toBeVisible();
     await page.getByRole('menuitem', { name: 'Developer guide', exact: true }).click();
     await page

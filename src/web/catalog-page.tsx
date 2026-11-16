@@ -1,7 +1,7 @@
-import { Button, Card, Input, Pagination, Select, Space, Tabs, Typography } from 'antd';
+import { Alert, Button, Card, Input, Pagination, Select, Space, Tabs, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { copyText } from './client.js';
-import type { Entity, Kind, Observation } from '../scanner/model.js';
+import type { Diagnostic, Entity, Kind, Observation } from '../scanner/model.js';
 import {
   Code,
   EmptyView,
@@ -26,7 +26,7 @@ export function useCatalog(kind?: Kind) {
   const [selected, setSelected] = useState('');
   const results = useLoad(
     () =>
-      command<Listed<Entity>>('catalog list', {
+      command<Listed<Entity> & { coverage?: { unresolved: number; examples: Diagnostic[] } }>('catalog list', {
         kind: kind ?? filter,
         query,
         offset,
@@ -74,7 +74,8 @@ export function CatalogList({
   expanded?: boolean;
   choose?: (entity: Entity) => void;
 }) {
-  const { t } = useWorkspace();
+  const { t, lang, showSource } = useWorkspace();
+  const coverage = list.results.data?.coverage;
   return (
     <Card size="small">
       <div className="stack">
@@ -109,7 +110,7 @@ export function CatalogList({
                 list.setOrigin(value);
                 list.setOffset(0);
               }}
-              options={(['declaration', 'source', 'runtime'] as const).map((value) => ({
+              options={(['declaration', 'source', 'runtime', 'call-site'] as const).map((value) => ({
                 value,
                 label: t(value),
               }))}
@@ -146,6 +147,35 @@ export function CatalogList({
           </div>
         )}
         <ErrorView error={list.results.error} />
+        {!!coverage?.unresolved && (
+          <Alert
+            type="info"
+            title={lang === 'zh-CN' ? 'API 源码覆盖提示' : 'API source coverage'}
+            description={
+              <details>
+                <summary>
+                  {lang === 'zh-CN'
+                    ? coverage.unresolved + ' 条路由诊断'
+                    : coverage.unresolved + ' route diagnostics'}
+                </summary>
+                <ul className="catalog-coverage-list">
+                  {coverage.examples.map((issue, index) => (
+                    <li key={index}>
+                      {issue.path ? (
+                        <Button type="link" onClick={() => showSource(issue.path!, issue.line)}>
+                          {issue.path}
+                          {issue.line ? ':' + issue.line : ''}
+                        </Button>
+                      ) : (
+                        issue.code
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            }
+          />
+        )}
         {list.results.loading && !list.results.data ? (
           <Loading />
         ) : (

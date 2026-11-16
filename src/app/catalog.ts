@@ -31,12 +31,13 @@ const ignored = new Set([
   'coverage',
 ]);
 const openApiName = /(?:^|\/)(?:openapi|swagger)(?:[._-][^/]*)?\.(?:ya?ml|json)$/i;
-const scannerVersion = 2;
+export const scannerVersion = 3;
+const apiCoverageCodes = new Set(['DYNAMIC_ROUTE', 'HTTP_HANDLER_UNRESOLVED', 'EXPRESS_SOURCE_PARSE']);
 
 function hasApiVersion(path: string, text: string) {
   if (!/\.(?:json|ya?ml)$/i.test(path) || !/\b(?:openapi|swagger|swaggerVersion)\b/.test(text)) return false;
   try {
-    const document = mapping(yamlDocument(text));
+    const document = mapping(yamlDocument(text).value);
     return ['openapi', 'swagger', 'swaggerVersion'].some((key) => typeof document?.[key] === 'string');
   } catch {
     return false;
@@ -117,17 +118,19 @@ export function mergeObservations(
     if (!group.has(identity)) group.set(identity, item);
   }
   return [...groups.values()]
-    .map((entries) => {
+    .flatMap((entries) => {
       const group = [...entries.values()];
-      const first = group.find((entry) => entry.origin === 'declaration') ?? group[0];
-      const sources = new Set(group.map((entry) => entry.origin));
+      const providers = group.filter((entry) => entry.origin !== 'call-site');
+      const first = providers.find((entry) => entry.origin === 'declaration') ?? providers[0];
+      if (!first) return [];
+      const sources = new Set(providers.map((entry) => entry.origin));
       const differences: string[] = [];
       if (first.kind === 'api') {
         if (!sources.has('declaration') && sources.has('source')) differences.push('MISSING_CONTRACT');
         if (sources.has('declaration') && !sources.has('source')) differences.push('UNVERIFIED_IMPLEMENTATION');
-        const paths = new Set(group.map((entry) => entry.definition.path));
+        const paths = new Set(providers.map((entry) => entry.definition.path));
         const definitions = new Set(
-          group.filter((entry) => entry.origin !== 'source').map((entry) => stableJson(entry.definition)),
+          providers.filter((entry) => entry.origin !== 'source').map((entry) => stableJson(entry.definition)),
         );
         if (paths.size > 1 || definitions.size > 1) differences.push('DEFINITION_CONFLICT');
       }
@@ -148,9 +151,9 @@ export function mergeObservations(
         kind: first.kind,
         service: first.service,
         name: first.name,
-        summary: first.summary || group.find((entry) => entry.summary)?.summary || '',
-        version: digest(stableJson([...new Set(group.map((entry) => stableJson(entry.definition)))].sort())),
-        observations: group,
+        summary: first.summary || providers.find((entry) => entry.summary)?.summary || '',
+        version: digest(stableJson([...new Set(providers.map((entry) => stableJson(entry.definition)))].sort())),
+        observations: [...providers, ...group.filter((entry) => entry.origin === 'call-site')],
         differences,
       };
     })
@@ -209,13 +212,14 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
   const cache: [string, ScanFile][] = [];
   const hashes: [string, string][] = [];
   let complete = true;
+  let warnings = 0;
   const files = [...paths].sort();
   let processed = 0;
   let reportedAt = 0;
   for (const path of files) {
     check();
     if (processed === 0 || Date.now() - reportedAt >= 100) {
-      options.progress?.({ stage: 'processing', processed, total: files.length, warnings: diagnostics.length });
+      options.progress?.({ stage: 'processing', processed, total: files.length, warnings });
       reportedAt = Date.now();
     }
     processed++;
@@ -252,11 +256,15 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
         }
         cache.push([key, file]);
       }
-      for (const item of file.diagnostics) diagnostics.push(item);
+      for (const item of file.diagnostics) {
+        diagnostics.push(item);
+        if (item.severity !== 'info') warnings++;
+      }
       for (const item of file.observations) observations.push(item);
     } catch (error) {
       check();
       complete = false;
+      warnings++;
       diagnostics.push({
         path,
         code: 'FILE_SCAN_FAILED',
@@ -275,6 +283,7 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
   const snapshot: Snapshot = {
     id: options.snapshotId ?? randomUUID(),
     source: historical ? 'git' : 'worktree',
+    scannerVersion,
     created: new Date().toISOString(),
     commit,
     scope,
@@ -283,7 +292,7 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
     worktree: digest(stableJson(hashes)),
     entities: [],
   };
-  options.progress?.({ stage: 'saving', processed, total: files.length, warnings: diagnostics.length });
+  options.progress?.({ stage: 'saving', processed, total: files.length, warnings });
   check();
   repository.transaction(() => {
     const runtime = historical ? [] : repository.list<RuntimeObservation>('observations');
@@ -310,7 +319,8 @@ function normalized(paths?: string[]) {
 
 export function activeSnapshot(repository: Repository): Snapshot | undefined {
   const id = repository.setting<string>('activeSnapshot');
-  return id ? repository.get<Snapshot>('scans', id) : undefined;
+  const snapshot = id ? repository.get<Snapshot>('scans', id) : undefined;
+  return snapshot?.scannerVersion === scannerVersion ? snapshot : undefined;
 }
 
 export function catalog(repository: Repository, historical?: string) {
@@ -400,7 +410,20 @@ export function searchCatalog(
       (a.observations[0].path ?? '').localeCompare(b.observations[0].path ?? '', 'en') ||
       a.id.localeCompare(b.id, 'en'),
   );
-  return page(items, options.limit, options.offset);
+  const snapshot = options.snapshot ? getSnapshot(repository, options.snapshot) : activeSnapshot(repository);
+  const unresolved = snapshot?.diagnostics.filter((issue) => apiCoverageCodes.has(issue.code)) ?? [];
+  return {
+    ...page(items, options.limit, options.offset),
+    ...(options.kind === 'api' || !options.kind
+      ? {
+          coverage: {
+            method: 'contracts-and-recognized-server-routes',
+            unresolved: unresolved.length,
+            examples: unresolved.slice(0, 8),
+          },
+        }
+      : {}),
+  };
 }
 
 export function diffScans(from: Snapshot, to: Snapshot) {
