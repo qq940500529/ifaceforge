@@ -1,7 +1,6 @@
 import express from 'express';
-import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { Workbench } from '../app/workbench.js';
+import { Workbench, type CommandInput } from '../app/workbench.js';
 import { failure, invalid } from '../app/errors.js';
 import { commandNames } from '../cli/commands.js';
 import { Projects } from '../storage/projects.js';
@@ -14,21 +13,12 @@ const project = registry.paths(registry.add(process.argv[2]).id);
 const db = openProjectDatabase(project);
 const bench = new Workbench(project, new Repository(db));
 const app = express();
-const csrf = randomUUID();
-app.get('/api/v1/bootstrap', (_req, res) => {
-  res.json({ csrf });
-});
-app.post('/api/v1/commands/:command', express.json({ limit: '4mb' }), async (req, res) => {
-  try {
-    if (req.get('x-ifg-csrf') !== csrf || req.get('origin') !== 'http://' + req.get('host')) {
-      return res.status(403).json({ code: 'FORBIDDEN', message: 'Invalid test session' });
-    }
-    if (!commandNames.has(req.params.command)) invalid('Unknown command');
-    return res.json(await bench.execute(req.params.command, req.body, false));
-  } catch (error) {
-    const { code, message, details } = failure(error);
-    return res.status(400).json({ code, message, details });
+app.use((req, res, next) => {
+  const address = server.address();
+  if (!address || typeof address === 'string' || req.get('host') !== '127.0.0.1:' + address.port) {
+    return res.sendStatus(403);
   }
+  next();
 });
 app.use(express.static(fileURLToPath(new URL('../web/', import.meta.url))));
 const server = app.listen(0, '127.0.0.1', () => {
@@ -50,7 +40,16 @@ async function close() {
     if (process.connected) process.disconnect?.();
   });
 }
-process.on('message', (message) => {
-  if (message === 'stop') void close();
+process.on('message', async (message: 'stop' | { id: number; command: string; input: CommandInput }) => {
+  if (message === 'stop') return close();
+  if (!message || !Number.isSafeInteger(message.id)) return;
+  try {
+    if (!commandNames.has(message.command)) invalid('Unknown command');
+    const data = await bench.execute(message.command, message.input, false);
+    process.send?.({ id: message.id, status: 200, data });
+  } catch (error) {
+    const { code, message: text, details } = failure(error);
+    process.send?.({ id: message.id, status: 400, data: { code, message: text, details } });
+  }
 });
 process.on('disconnect', () => void close());

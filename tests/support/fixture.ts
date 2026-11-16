@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Server } from 'node:http';
+import type { Page } from '@playwright/test';
 
 export const repositoryRoot = resolve(import.meta.dirname, '../..');
 const cli = resolve(process.env.IFG_TEST_CLI ?? join(repositoryRoot, 'dist', 'cli', 'main.js'));
@@ -73,7 +74,7 @@ export function ifgStdin<T = any>(project: string, input: unknown, ...args: stri
   return { exit: result.status!, stderr: result.stderr, result: JSON.parse(result.stdout) };
 }
 
-export async function browserWorkbench(root: string) {
+export async function browserWorkbench(root: string, page: Page) {
   const child = spawn(process.execPath, [join(repositoryRoot, 'dist', 'server', 'test-host.js'), root], {
     env: fixtureEnv(root),
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
@@ -90,6 +91,52 @@ export async function browserWorkbench(root: string) {
     child.once('message', (message) => resolve(message as { url: string; data: string }));
   });
   const info = await ready;
+  const pending = new Map<number, (reply: { status: number; data: unknown }) => void>();
+  let sequence = 0;
+  child.on('message', (reply: { id?: number; status: number; data: unknown }) => {
+    if (reply.id === undefined) return;
+    pending.get(reply.id)?.(reply);
+    pending.delete(reply.id);
+  });
+  child.once('exit', () => {
+    for (const finish of pending.values())
+      finish({ status: 503, data: { code: 'ENGINE_UNAVAILABLE', message: 'Test host exited' } });
+    pending.clear();
+  });
+  const sameFrame = (request: import('@playwright/test').Request) => {
+    const frame = request.frame();
+    return frame === page.mainFrame() && new URL(frame.url()).origin === info.url;
+  };
+  const csrf = 'local-playwright-bridge';
+  await page.route(info.url + '/api/v1/bootstrap', (route) =>
+    sameFrame(route.request()) ? route.fulfill({ json: { csrf } }) : route.abort(),
+  );
+  await page.route(info.url + '/api/v1/commands/*', async (route) => {
+    const request = route.request();
+    const headers = request.headers();
+    if (
+      request.method() !== 'POST' ||
+      !sameFrame(request) ||
+      headers.origin !== info.url ||
+      headers['x-ifg-csrf'] !== csrf ||
+      !headers['content-type']?.startsWith('application/json')
+    )
+      return route.abort();
+    const command = decodeURIComponent(new URL(request.url()).pathname.split('/').at(-1)!);
+    const input = request.postDataJSON() ?? {};
+    const id = ++sequence;
+    const reply = new Promise<{ status: number; data: unknown }>((finish) => pending.set(id, finish));
+    child.send({ id, command, input }, (error) => {
+      if (!error) return;
+      pending.get(id)?.({
+        status: 503,
+        data: { code: 'ENGINE_UNAVAILABLE', message: 'Test host IPC is unavailable' },
+      });
+      pending.delete(id);
+    });
+    const { status, data } = await reply;
+    await route.fulfill({ status, json: data });
+  });
   return {
     ...info,
     async stop() {

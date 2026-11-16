@@ -16,13 +16,35 @@ for (const language of ['en', 'zh-CN'] as const) {
       const service = createServer(taskApp());
       const serviceUrl = await address(service);
       const zh = language === 'zh-CN';
-      const host = await browserWorkbench(root);
+      const host = await browserWorkbench(root, page);
       const { url } = host;
       const label = (en: string, cn: string) => (zh ? cn : en);
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       try {
         expect(url).toMatch(/^http:\/\/127\.0\.0\.1:/);
+        expect((await fetch(url + '/api/v1/bootstrap')).status).toBe(404);
+        expect(
+          (await fetch(url + '/api/v1/commands/' + encodeURIComponent('api send'), { method: 'POST', body: '{}' }))
+            .status,
+        ).toBe(404);
+        await page.goto(serviceUrl);
+        const crossed = await page.evaluate(
+          async ({ target, bridge }) => {
+            try {
+              await fetch(bridge + '/api/v1/commands/' + encodeURIComponent('api send'), {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ body: { method: 'GET', url: target + '/tasks/42' } }),
+              });
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          { target: serviceUrl, bridge: url },
+        );
+        expect(crossed).toBe(false);
         await page.goto(url);
         await expect(page.getByRole('heading', { name: label('Catalog', '目录') })).toBeVisible();
         await page.getByRole('button', { name: label('Scan project', '扫描项目') }).click();
@@ -99,7 +121,7 @@ test('discovers an MCP tool and submits a schema field through the Web interface
   const { root, write, destroy } = fixture();
   const service = mcpHttp();
   const target = await address(service);
-  const host = await browserWorkbench(root);
+  const host = await browserWorkbench(root, page);
   try {
     const profile = await ifg(
       root,

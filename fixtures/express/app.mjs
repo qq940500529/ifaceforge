@@ -12,11 +12,9 @@ export function taskApp() {
   });
   const dynamicRoute = '/health';
   app.get(dynamicRoute, (_req, res) => res.json({ ok: true }));
-  app.get('/contract', (_req, res) => {
-    const contract = parse(readFileSync(new URL('./openapi.yml', import.meta.url), 'utf8'));
-    contract.paths['/health'] = { get: { summary: 'Health', responses: { 200: { description: 'Online' } } } };
-    res.json(contract);
-  });
+  const contract = parse(readFileSync(new URL('./openapi.yml', import.meta.url), 'utf8'));
+  contract.paths['/health'] = { get: { summary: 'Health', responses: { 200: { description: 'Online' } } } };
+  app.get('/contract', (_req, res) => res.json(contract));
   return app;
 }
 
