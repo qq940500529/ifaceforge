@@ -91,14 +91,28 @@ for (const language of ['en', 'zh-CN'] as const) {
         await page.getByRole('button', { name: 'Modified by CLI' }).click();
         await page.getByRole('button', { name: label('Run', '运行'), exact: true }).click();
         await expect(page.getByText('Sample task', { exact: false }).first()).toBeVisible();
-        await page.getByRole('menuitem', { name: 'Wiki', exact: true }).click();
-        const generate = page.getByRole('button', { name: label('Generate Wiki', '生成 Wiki') });
-        await generate.click();
-        await expect(page.getByRole('heading', { name: label('IfaceForge Wiki', '接口工坊 Wiki') })).toBeVisible();
-        await expect(generate).not.toHaveClass(/ant-btn-loading/);
+        const history = Promise.withResolvers<void>();
+        await page.route(url + '/api/v1/commands/' + encodeURIComponent('wiki list'), async (route) => {
+          await history.promise;
+          await route.fallback();
+        });
         const reader = page.locator('.wiki-detail');
-        await reader.getByRole('link', { name: new RegExp('^' + label('Skills', '技能') + ' · \\d+$') }).click();
-        await expect(reader.getByRole('heading', { name: label('Skills', '技能'), exact: true })).toBeFocused();
+        const heading = reader.getByRole('heading', { name: label('Skills', '技能'), exact: true });
+        try {
+          await page.getByRole('menuitem', { name: 'Wiki', exact: true }).click();
+          const generate = page.getByRole('button', { name: label('Generate Wiki', '生成 Wiki') });
+          await generate.click();
+          await expect(
+            page.getByRole('heading', { name: label('IfaceForge Wiki', '接口工坊 Wiki') }),
+          ).toBeVisible();
+          await expect(generate).not.toHaveClass(/ant-btn-loading/);
+          await reader.getByRole('link', { name: new RegExp('^' + label('Skills', '技能') + ' · \\d+$') }).click();
+          await expect(heading).toBeFocused();
+        } finally {
+          history.resolve();
+        }
+        await expect(page.getByRole('button', { name: join(host.data, 'wiki'), exact: true })).toBeVisible();
+        await expect(heading).toBeFocused();
         const catalog = JSON.parse(readFileSync(join(host.data, 'wiki', 'catalog.json'), 'utf8'));
         expect(catalog.locale).toBe(language);
         await page.getByRole('button', { name: zh ? 'English' : '简体中文', exact: true }).click();

@@ -1,6 +1,16 @@
 import { Alert, Button, Card, Empty, Input, Select, Skeleton, Space, Tag, Typography } from 'antd';
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Run } from '../app/runs.js';
 import type { SandboxPlan } from '../protocols/mcp-sandbox.js';
@@ -169,68 +179,72 @@ export function Markdown({
 }) {
   const prefix = 'md-' + useId() + '-';
   const { lang } = useWorkspace();
+  const components = useMemo<Components>(
+    () => ({
+      a: ({ children, href, id, ...props }) => {
+        const openPage = href ? wikiLink?.(href) : undefined;
+        const section = href ? wikiSections?.get(href) : undefined;
+        if (openPage) {
+          return (
+            <a
+              href={href}
+              onClick={(event) => {
+                event.preventDefault();
+                openPage();
+              }}
+            >
+              {children}
+            </a>
+          );
+        }
+        const anchor = section ? prefix + section : href?.slice(1);
+        return section || href?.startsWith('#' + prefix) ? (
+          <a
+            href={'#' + anchor}
+            id={id}
+            data-wiki-section={section || undefined}
+            aria-label={props['aria-label']}
+            onClick={(event) => {
+              event.preventDefault();
+              const target = anchor ? document.getElementById(anchor) : null;
+              target?.scrollIntoView({ block: 'nearest' });
+              target?.focus({ preventScroll: true });
+            }}
+          >
+            {children}
+          </a>
+        ) : (
+          <span title={href}>{children}</span>
+        );
+      },
+      h2: ({ children }) => {
+        const slug = typeof children === 'string' ? children.toLowerCase().replaceAll(' ', '-') : '';
+        const heading = wikiSections?.get('#' + encodeURI(slug));
+        return (
+          <h2 id={heading ? prefix + heading : undefined} tabIndex={heading ? -1 : undefined}>
+            {children}
+          </h2>
+        );
+      },
+      img: ({ alt }) => <span>{alt}</span>,
+      table: ({ children }) => (
+        <div className="markdown-table" tabIndex={0}>
+          <table>{children}</table>
+        </div>
+      ),
+      li: ({ node: _node, ...props }) => (
+        <li {...props} tabIndex={props.id?.startsWith(prefix) ? -1 : undefined} />
+      ),
+    }),
+    [prefix, wikiLink, wikiSections],
+  );
   return (
     <div className="markdown">
       <ReactMarkdown
         skipHtml
         remarkPlugins={[remarkGfm]}
         remarkRehypeOptions={{ clobberPrefix: prefix, footnoteLabel: lang === 'zh-CN' ? '脚注' : 'Footnotes' }}
-        components={{
-          a: ({ children, href, id, ...props }) => {
-            const openPage = href ? wikiLink?.(href) : undefined;
-            const section = href ? wikiSections?.get(href) : undefined;
-            if (openPage) {
-              return (
-                <a
-                  href={href}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    openPage();
-                  }}
-                >
-                  {children}
-                </a>
-              );
-            }
-            const anchor = section ? prefix + section : href?.slice(1);
-            return section || href?.startsWith('#' + prefix) ? (
-              <a
-                href={'#' + anchor}
-                id={id}
-                data-wiki-section={section || undefined}
-                aria-label={props['aria-label']}
-                onClick={(event) => {
-                  event.preventDefault();
-                  const target = anchor ? document.getElementById(anchor) : null;
-                  target?.scrollIntoView({ block: 'nearest' });
-                  target?.focus({ preventScroll: true });
-                }}
-              >
-                {children}
-              </a>
-            ) : (
-              <span title={href}>{children}</span>
-            );
-          },
-          h2: ({ children }) => {
-            const slug = typeof children === 'string' ? children.toLowerCase().replaceAll(' ', '-') : '';
-            const heading = wikiSections?.get('#' + encodeURI(slug));
-            return (
-              <h2 id={heading ? prefix + heading : undefined} tabIndex={heading ? -1 : undefined}>
-                {children}
-              </h2>
-            );
-          },
-          img: ({ alt }) => <span>{alt}</span>,
-          table: ({ children }) => (
-            <div className="markdown-table" tabIndex={0}>
-              <table>{children}</table>
-            </div>
-          ),
-          li: ({ node: _node, ...props }) => (
-            <li {...props} tabIndex={props.id?.startsWith(prefix) ? -1 : undefined} />
-          ),
-        }}
+        components={components}
       >
         {children}
       </ReactMarkdown>
@@ -539,18 +553,19 @@ export function TextButtonList<T>({
 export function useSplitView() {
   const listRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const reveal = useCallback((target?: HTMLElement | null) => {
+    const detail = detailRef.current;
+    if (!detail) return;
+    detail.scrollTop = 0;
+    if (getComputedStyle(detail).position !== 'sticky') {
+      (target ?? detail).scrollIntoView({ block: 'start' });
+      detail.focus({ preventScroll: true });
+    }
+  }, []);
   return {
     listRef,
     detailRef,
-    reveal(target?: HTMLElement | null) {
-      const detail = detailRef.current;
-      if (!detail) return;
-      detail.scrollTop = 0;
-      if (getComputedStyle(detail).position !== 'sticky') {
-        (target ?? detail).scrollIntoView({ block: 'start' });
-        detail.focus({ preventScroll: true });
-      }
-    },
+    reveal,
     back() {
       const list = listRef.current;
       list?.scrollIntoView({ block: 'start' });
