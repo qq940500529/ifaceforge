@@ -165,7 +165,8 @@ createServer(async (req,res)=>{
     const plan = (await ifg<NativePlan>(sample.root, 'mcp', 'plan', ...args)).result.data;
     expect(plan).toMatchObject({ source: 'git', transport: 'streamableHttp', url: origin + '/mcp', issues: [] });
     const conflict = await ifg<Run>(sample.root, 'mcp', 'probe', ...args, '--approve', plan.fingerprint);
-    expect(conflict.result.data.steps[0].error?.details).toMatchObject({ cause: { code: 'MCP_PORT_IN_USE' } });
+    const error = conflict.result.data.steps[0].error;
+    expect(error?.details, JSON.stringify(error)).toMatchObject({ cause: { code: 'MCP_PORT_IN_USE' } });
     await new Promise<void>((resolve, reject) =>
       reservation.close((error) => (error ? reject(error) : resolve())),
     );

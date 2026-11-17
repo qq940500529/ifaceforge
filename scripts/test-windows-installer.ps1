@@ -12,13 +12,29 @@ $uninstaller = Join-Path $install "Uninstall $ProductName.exe"
 $startMenu = Join-Path ([Environment]::GetFolderPath('Programs', 'Create')) "$ProductName.lnk"
 $desktop = Join-Path ([Environment]::GetFolderPath('DesktopDirectory', 'Create')) "$ProductName.lnk"
 $shell = New-Object -ComObject WScript.Shell
+$explorer = New-Object -ComObject Shell.Application
+
+function Get-CanonicalPath([string]$Path) {
+    if (!$Path -or !(Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    & node -e 'process.stdout.write(require("node:fs").realpathSync.native(process.argv[1]))' $Path
+    if ($LASTEXITCODE -ne 0) { throw "Cannot resolve $Path." }
+}
 
 function Assert-Shortcut([string]$Path, [bool]$Expected) {
     if ((Test-Path -LiteralPath $Path -PathType Leaf) -ne $Expected) {
         throw "Unexpected shortcut state at $Path. Expected presence $Expected."
     }
-    if ($Expected -and $shell.CreateShortcut($Path).TargetPath -ine $exe) {
-        throw "Shortcut at $Path does not target the installed application."
+    if ($Expected) {
+        $target = $shell.CreateShortcut($Path).TargetPath
+        $expectedPath = Get-CanonicalPath $exe
+        if ((Get-CanonicalPath $target) -ine $expectedPath) {
+            $folder = $explorer.NameSpace((Split-Path -LiteralPath $Path))
+            $link = $folder.ParseName((Split-Path -Leaf $Path))
+            $parsingPath = $link.ExtendedProperty('System.Link.TargetParsingPath')
+            if ((Get-CanonicalPath $parsingPath) -ine $expectedPath) {
+                throw "Shortcut at $Path targets '$target' (shell path '$parsingPath'), expected '$exe'."
+            }
+        }
     }
 }
 

@@ -263,7 +263,8 @@ export async function openNative(
   try {
     let root = project.root;
     if (plan.source === 'git') {
-      temporary = await mkdtemp(join(tmpdir(), 'ifaceforge-mcp-native-'));
+      // macOS can expose the temporary directory through a symlink beneath /var.
+      temporary = await mkdtemp(join(await realpath(tmpdir()), 'ifaceforge-mcp-native-'));
       const archive = join(temporary, 'source.tar');
       await gitAsync(
         root,
@@ -318,11 +319,17 @@ export async function openNative(
     progress?.(stage);
     if (config.transport === 'stdio') {
       const start = () => new ManagedMcpStdio(() => startMcpProcess(command, plan.args, cwd, env), capture);
+      // The Windows supervisor initializes containment before forwarding the protocol.
+      const connectTimeout = process.platform === 'win32' ? 20_000 : undefined;
       transport = start();
       stage = 'negotiate';
       progress?.(stage);
       try {
-        session = await McpSession.connect(profile, root, bindings, signal, { transport });
+        session = await McpSession.connect(profile, root, bindings, signal, {
+          transport,
+          connectTimeout,
+          probeTimeout: connectTimeout,
+        });
       } catch (error) {
         if (
           config.protocolVersion ||
@@ -334,7 +341,11 @@ export async function openNative(
           throw error;
         await transport.close();
         transport = start();
-        session = await McpSession.connect(profile, root, bindings, signal, { transport, legacy: true });
+        session = await McpSession.connect(profile, root, bindings, signal, {
+          transport,
+          legacy: true,
+          connectTimeout,
+        });
       }
     } else {
       child = startMcpProcess(command, plan.args, cwd, env);
