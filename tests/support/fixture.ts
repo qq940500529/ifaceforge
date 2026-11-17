@@ -13,6 +13,25 @@ const parent = realpathSync.native(tmpdir());
 const directories = new Map<string, string>();
 const fixtureEnv = (root: string) => ({ ...process.env, IFG_DATA_HOME: directories.get(root) });
 
+export function commitFixture(root: string) {
+  execFileSync('git', ['-C', root, 'add', '.'], { windowsHide: true });
+  execFileSync(
+    'git',
+    [
+      '-C',
+      root,
+      '-c',
+      'user.name=IfaceForge Tests',
+      '-c',
+      'user.email=tests@example.test',
+      'commit',
+      '-qm',
+      'Prepare test workspace',
+    ],
+    { windowsHide: true },
+  );
+}
+
 export function fixture(name = 'express') {
   const base = mkdtempSync(join(parent, 'ifaceforge 项目 with spaces '));
   const root = join(base, name);

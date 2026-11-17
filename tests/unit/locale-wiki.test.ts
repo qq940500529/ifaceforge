@@ -31,14 +31,23 @@ it('merges notes, preserves unowned documents and restores the database and note
   const db = openProjectDatabase(project);
   const repository = new Repository(db);
   try {
-    const scan = scanProject(project, repository, { includeUntracked: true });
+    const scan = await scanProject(project, repository, { includeUntracked: true });
     const entity = scan.entities[0];
     putNote(project, entity.id, '人工内容');
     const out = join(root, 'output');
     mkdirSync(out);
     writeFileSync(join(out, 'external.md'), 'external');
     const built = buildWiki(project, repository, { out, locale: 'zh-CN' });
-    expect(readFileSync(join(out, built.catalog.items[0].page), 'utf8')).toContain('人工内容');
+    const page = built.catalog.items[0].page;
+    const overview = readFileSync(join(out, 'README.md'), 'utf8');
+    expect(overview).toContain('[技能 · 1](#技能)');
+    expect(overview).toContain('## 技能');
+    expect(overview).toContain('| 名称 | 说明 |');
+    expect(overview).toContain(`[read](${page})`);
+    const detail = readFileSync(join(out, page), 'utf8');
+    expect(detail).toContain('[← Wiki 总览](../README.md)');
+    expect(detail).toContain('## 技能文档\n\n# Body');
+    expect(detail).toContain('## 人工说明\n\n人工内容');
     expect(readFileSync(join(out, 'external.md'), 'utf8')).toBe('external');
     expect(previewWiki(project, repository, { out, locale: 'zh-CN' }).changed).toEqual([]);
     expect(previewWiki(project, repository, { out, locale: 'en' }).changed).toContain('README.md');

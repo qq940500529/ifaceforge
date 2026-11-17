@@ -16,45 +16,52 @@
     "languages": [
       "any with a contract",
       "Express source evidence",
-      "FastAPI source evidence"
+      "FastAPI source evidence",
+      "Python standard-library and static dispatch source evidence"
     ]
   },
   "mcp": {
-    "revisions": [
-      "2024-11-05",
-      "2025-03-26",
-      "2025-06-18",
-      "2025-11-25",
-      "2026-07-28"
-    ],
+    "revisions": ["2024-10-07", "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"],
     "transports": [
-      "stdio",
-      "HTTP + SSE for legacy servers",
-      "Streamable HTTP"
+      "stdio in a temporary Docker Linux container or approved native process",
+      "Streamable HTTP on the temporary runner's loopback interface",
+      "legacy HTTP+SSE on the temporary runner's loopback interface with an applicable protocol revision"
     ],
-    "scan": [
-      "portable manifest",
-      "supported JavaScript and TypeScript SDK registrations"
-    ],
-    "comparison": "committed definitions; runtime discovery is environment-specific",
-    "operations": [
-      "tools",
-      "resources",
-      "resourceTemplates",
-      "prompts"
-    ]
+    "scan": ["portable manifest", "service configuration", "SDK registrations", "protocol method evidence"],
+    "sourceLanguages": {
+      "typedRegistration": ["JavaScript", "TypeScript", "Python FastMCP"],
+      "syntaxAndRecognizableRegistrations": [
+        "Go",
+        "Rust",
+        "Java",
+        "Kotlin",
+        "C#",
+        "C",
+        "C++",
+        "Swift",
+        "Ruby",
+        "PHP",
+        "Scala",
+        "Dart",
+        "Bash",
+        "Lua",
+        "Elixir",
+        "OCaml"
+      ],
+      "protocolEvidence": ["F#", "PowerShell", "Batch", "R", "Julia", "Erlang", "Haskell", "Perl"]
+    },
+    "auth": "Explicit request headers or environment references for temporary local HTTP endpoints",
+    "runtimeExtensions": {
+      "interactiveClientRequests": "reported as unsupported when requested",
+      "subscriptionsAndTasks": "not part of capability discovery and direct capability tests"
+    },
+    "comparison": "committed definitions",
+    "operations": ["tools", "resources", "resourceTemplates", "prompts"]
   },
   "skills": {
     "format": "Agent Skills SKILL.md",
-    "versions": [
-      "Git commit",
-      "optional metadata.version"
-    ],
-    "scan": [
-      "metadata",
-      "instructions",
-      "relative references"
-    ],
+    "versions": ["Git commit", "optional metadata.version"],
+    "scan": ["metadata", "instructions", "relative references"],
     "comparison": "committed documents and reference paths"
   }
 }

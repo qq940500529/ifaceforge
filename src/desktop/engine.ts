@@ -7,6 +7,7 @@ import { locateProject } from '../app/project.js';
 import { Workbench, type CommandInput } from '../app/workbench.js';
 import type { Run } from '../app/runs.js';
 import type { ScanProgress } from '../app/catalog.js';
+import type { Diagnostic } from '../scanner/model.js';
 import { commandNames } from '../cli/commands.js';
 import { bindingEnvironment } from '../protocols/variables.js';
 import { openProjectDatabase } from '../storage/database.js';
@@ -85,7 +86,7 @@ function tasks(): TaskList {
       })),
   );
   return {
-    scans: [...scans.values()].map(({ task }) => task),
+    scans: [...scans.values()].map(({ task: { issues: _issues, ...task } }) => task),
     versions: [...versions.values()].map(({ task: { result: _result, ...task } }) => task),
     runs,
   };
@@ -181,12 +182,32 @@ function startScan(project: string, input: { full?: boolean; includeUntracked?: 
   };
   worker.on(
     'message',
-    ({ progress, result, error }: { progress?: ScanProgress; result?: ScanSummary; error?: ErrorInfo }) => {
-      if (progress && active(task)) Object.assign(task, progress);
+    ({
+      progress,
+      issues,
+      result,
+      error,
+    }: {
+      progress?: ScanProgress;
+      issues?: Diagnostic[];
+      result?: ScanSummary;
+      error?: ErrorInfo;
+    }) => {
+      if (!active(task)) return;
+      if (issues?.length) {
+        task.issues ??= [];
+        for (const issue of issues) {
+          task.issues.push(issue);
+          if (issue.severity === 'error') task.errors = (task.errors ?? 0) + 1;
+          else task.warnings++;
+        }
+      }
+      if (progress) Object.assign(task, progress);
       if (error) fail(error);
       if (result && active(task)) {
         task.state = 'complete';
         task.result = result;
+        delete task.issues;
         task.finished = Date.now();
         persisted(task);
       }
@@ -225,7 +246,6 @@ export function hasActiveWork() {
   return (
     tasks().runs.length > 0 ||
     inFlight.size > 0 ||
-    [...benches.values()].some((bench) => bench.executor.connectionInfo().length > 0) ||
     [...scans.values(), ...versions.values()].some((job) => active(job.task))
   );
 }
@@ -274,7 +294,7 @@ export async function execute(request: EngineRequest): Promise<unknown> {
     case 'task history': {
       const open = new Map([...scans.values(), ...versions.values()].map(({ task }) => [task.id, task]));
       return registry.savedTasks<ScanTask | VersionTask>().map((saved) => {
-        const { result: _result, ...task } = open.get(saved.id) ?? interrupted(saved);
+        const { result: _result, issues: _issues, ...task } = open.get(saved.id) ?? interrupted(saved);
         return task;
       });
     }

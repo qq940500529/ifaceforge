@@ -29,13 +29,13 @@ npm run test:desktop
 
 For the live FastAPI case, install `fixtures/fastapi/requirements.txt` with a supported Python and set `IFG_TEST_PYTHON` to its executable. For a Linux desktop runner, use `xvfb-run -a npm run test:desktop`. Set `IFG_DESKTOP_EXE` to the packaged program to verify the shipped executable. Desktop screenshots and the test report appear in `test-results` and `playwright-desktop-report`.
 
-Use test projects, two separate worktrees, a custom install directory, and a fresh app data directory. Verify project isolation, scan cancellation and status, source and Wiki bounds, transport execution, visual layouts, and Windows install and uninstall. Check unit, integration and UI results for each release before publishing the corresponding assets. Refer to the release notes for the systems, architectures and scenarios actually tested.
+Use test projects, two separate worktrees, a custom install directory, and a fresh app data directory. Verify project isolation, scan cancellation and status, source and Wiki bounds, transport execution, visual layouts, and Windows install and uninstall. Record built platforms, CI results and hands-on validation separately. Windows x64 is the local acceptance platform. macOS ARM64 and Linux x64 builds lack hands-on validation for the first stable release. Community testing and [GitHub issue reports](https://github.com/qq940500529/ifaceforge/issues/new/choose) are welcome.
 
-## Publish a preview
+## Publish a release
 
 1. Submit the changes through a pull request. Review build results, cross-platform checks, dependency review and the desktop test artifacts. Use test data in public changes and logs.
 2. Create a version tag at the reviewed commit. Download the tested packages and dependency inventories. Compute SHA-256 over each delivered package and attach the checksum file to the release.
-3. Publish a prerelease with installation steps, verification scope, changes and known issues. Verify the tag and the actual assets from the release page.
+3. Publish the release with installation steps, verification scope, changes and known issues. Mark previews as prereleases. Verify the tag and the actual assets from the release page.
 
 The previous technical preview and its acceptance record remain available in the [v0.1.0 tag](https://github.com/qq940500529/ifaceforge/tree/v0.1.0).
 

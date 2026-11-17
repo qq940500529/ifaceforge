@@ -5,7 +5,7 @@ import { commitLanes } from '../app/git-graph.js';
 import type { BrowseVersion, VersionMode, VersionReport } from '../app/version-compare.js';
 import type { VersionTask } from '../desktop/protocol.js';
 import { download } from './client.js';
-import { Code, ErrorView, useLoad, useWorkspace, type Listed } from './components.js';
+import { BackToList, Code, ErrorView, useLoad, useSplitView, useWorkspace, type Listed } from './components.js';
 import './version.css';
 
 type Command = ReturnType<typeof useWorkspace>['command'];
@@ -438,10 +438,12 @@ function CommitGraph({
   state,
   focused,
   setFocused,
+  selectCommit,
 }: {
   state: Versions;
   focused?: GitCommit;
   setFocused: (value: GitCommit) => void;
+  selectCommit: (value: GitCommit) => void;
 }) {
   const { command, project } = useWorkspace();
   const text = useText();
@@ -733,7 +735,7 @@ function CommitGraph({
                   data-commit={item.sha}
                   key={item.sha}
                   aria-pressed={focused?.sha === item.sha}
-                  onClick={() => setFocused(item)}
+                  onClick={() => selectCommit(item)}
                   {...bind(item)}
                 >
                   <span className="git-row-main">
@@ -1186,11 +1188,23 @@ function VersionResults({ state }: { state: Versions }) {
 
 export function VersionPage({ state }: { state: Versions }) {
   const [focused, setFocused] = useState<GitCommit>();
+  const pane = useSplitView();
   return (
-    <div className="git-layout">
-      <CommitGraph state={state} focused={focused} setFocused={setFocused} />
-      <div className="stack">
+    <div className="git-layout detail-split">
+      <div ref={pane.listRef} className="list-anchor" tabIndex={-1}>
+        <CommitGraph
+          state={state}
+          focused={focused}
+          setFocused={setFocused}
+          selectCommit={(commit) => {
+            setFocused(commit);
+            pane.reveal(pane.detailRef.current?.querySelector('.git-details'));
+          }}
+        />
+      </div>
+      <div ref={pane.detailRef} className="stack list-detail" tabIndex={-1}>
         <VersionResults state={state} />
+        <BackToList onClick={pane.back} />
         <CommitDetails commit={focused} select={setFocused} state={state} />
       </div>
     </div>

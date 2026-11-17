@@ -1,4 +1,5 @@
-import type { Node } from '@babel/types';
+import type { CallExpression, Node } from '@babel/types';
+import traverse, { type NodePath } from '@babel/traverse';
 import type { Diagnostic, Observation } from './model.js';
 import { mcpId } from './model.js';
 import { mapping } from './openapi.js';
@@ -14,10 +15,10 @@ const registrations = {
   prompt: 'prompt',
   registerPrompt: 'prompt',
 } as const;
-type Capability = (typeof registrations)[keyof typeof registrations];
+export type Capability = (typeof registrations)[keyof typeof registrations];
 const lists = { tool: 'tools', resource: 'resources', template: 'resourceTemplates', prompt: 'prompts' } as const;
 
-function observation(
+export function mcpObservation(
   path: string,
   service: string,
   type: Capability,
@@ -82,7 +83,7 @@ export function parseMcpManifest(path: string, data: unknown, service: string, d
         return [];
       }
       return [
-        observation(
+        mcpObservation(
           path,
           name,
           type,
@@ -110,6 +111,68 @@ function objectKey(node: Node) {
   return node.type === 'Identifier' ? node.name : node.type === 'StringLiteral' ? node.value : undefined;
 }
 
+function serverImport(value: string) {
+  return /^@modelcontextprotocol\/(?:sdk\/server\/mcp(?:\.js)?|server(?:\/mcp)?)$/.test(value);
+}
+
+function requiredSdk(node: Node | null | undefined) {
+  return (
+    node?.type === 'CallExpression' &&
+    node.callee.type === 'Identifier' &&
+    node.callee.name === 'require' &&
+    node.arguments[0]?.type === 'StringLiteral' &&
+    serverImport(node.arguments[0].value)
+  );
+}
+
+function serverConstructor(node: Node, scope: NodePath['scope']) {
+  if (node.type === 'MemberExpression' || node.type === 'TSQualifiedName') {
+    const receiver = node.type === 'MemberExpression' ? node.object : node.left;
+    const name = node.type === 'MemberExpression' ? memberName(node) : node.right.name;
+    if (name !== 'McpServer' || receiver.type !== 'Identifier') return false;
+    const binding = scope.getBinding(receiver.name)?.path;
+    return binding?.isImportNamespaceSpecifier() && binding.parentPath.isImportDeclaration()
+      ? serverImport(binding.parentPath.node.source.value)
+      : Boolean(binding?.isVariableDeclarator() && requiredSdk(binding.node.init));
+  }
+  if (node.type !== 'Identifier') return false;
+  const binding = scope.getBinding(node.name)?.path;
+  if (binding?.isImportSpecifier() && binding.parentPath.isImportDeclaration())
+    return objectKey(binding.node.imported) === 'McpServer' && serverImport(binding.parentPath.node.source.value);
+  return Boolean(
+    binding?.isVariableDeclarator() &&
+    binding.node.id.type === 'ObjectPattern' &&
+    requiredSdk(binding.node.init) &&
+    binding.node.id.properties.some(
+      (item) =>
+        item.type === 'ObjectProperty' &&
+        objectKey(item.key) === 'McpServer' &&
+        item.value.type === 'Identifier' &&
+        item.value.name === node.name,
+    ),
+  );
+}
+
+function mcpReceiver(node: Node, scope: NodePath['scope'], depth = 0): boolean {
+  if (depth > 12) return false;
+  if (node.type === 'NewExpression') return serverConstructor(node.callee, scope);
+  if (node.type !== 'Identifier') return false;
+  const binding = scope.getBinding(node.name);
+  if (!binding?.constant) return false;
+  const original = binding.identifier.typeAnnotation;
+  if (
+    original?.type === 'TSTypeAnnotation' &&
+    original.typeAnnotation.type === 'TSTypeReference' &&
+    serverConstructor(original.typeAnnotation.typeName, binding.scope)
+  )
+    return true;
+  return Boolean(
+    binding.path.isVariableDeclarator() &&
+    binding.path.node.init &&
+    mcpReceiver(binding.path.node.init, binding.path.scope, depth + 1),
+  );
+}
+
 export function scanMcpSource(
   path: string,
   text: string,
@@ -117,17 +180,22 @@ export function scanMcpSource(
   diagnostics: Diagnostic[],
   checkpoint?: () => void,
 ) {
-  if (!/\.(?:registerTool|registerResource(?:Template)?|registerPrompt|tool|resource|prompt)\b/.test(text))
+  if (
+    !text.includes('@modelcontextprotocol/') ||
+    !/\b(?:registerTool|registerResource(?:Template)?|registerPrompt|tool|resource|resourceTemplate|prompt)\b/.test(
+      text,
+    )
+  )
     return [];
-  let program;
+  let ast;
   try {
-    program = parseJavaScript(path, text).program;
+    ast = parseJavaScript(path, text);
   } catch (error) {
     diagnostics.push({ path, code: 'MCP_SOURCE_PARSE', message: (error as Error).message });
     return [];
   }
   const constants = new Map<string, Node>();
-  for (const item of program.body) {
+  for (const item of ast.program.body) {
     const declaration = item.type === 'ExportNamedDeclaration' ? item.declaration : item;
     if (declaration?.type !== 'VariableDeclaration' || declaration.kind !== 'const') continue;
     for (const binding of declaration.declarations)
@@ -230,16 +298,23 @@ export function scanMcpSource(
   }
 
   const observations: Observation[] = [];
-  const pending: Node[] = [program];
+  const calls: CallExpression[] = [];
   let inspected = 0;
-  while (pending.length) {
-    const node = pending.pop()!;
-    if (++inspected % 256 === 0) checkpoint?.();
-    for (const value of Object.values(node)) {
-      for (const item of Array.isArray(value) ? value : [value])
-        if (item && typeof item === 'object' && typeof item.type === 'string') pending.push(item as Node);
-    }
-    if (node.type !== 'CallExpression') continue;
+  traverse(ast, {
+    CallExpression(call) {
+      if (++inspected % 256 === 0) checkpoint?.();
+      const { callee } = call.node;
+      const method = memberName(callee);
+      if (
+        method &&
+        Object.hasOwn(registrations, method) &&
+        (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression') &&
+        mcpReceiver(callee.object, call.scope)
+      )
+        calls.push(call.node);
+    },
+  });
+  for (const node of calls) {
     const method = memberName(node.callee);
     if (!method || !Object.hasOwn(registrations, method)) continue;
     const line = node.loc?.start.line;
@@ -275,7 +350,7 @@ export function scanMcpSource(
         message: name + ' at line ' + line + ': ' + unresolved.join(', '),
       });
     }
-    observations.push(observation(path, service, type, name, result, 'source', line));
+    observations.push(mcpObservation(path, service, type, name, result, 'source', line));
   }
   return observations.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
 }

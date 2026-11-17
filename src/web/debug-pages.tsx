@@ -8,6 +8,7 @@ import type { Entity } from '../scanner/model.js';
 import { copyText, download, unwrap } from './client.js';
 import { CatalogList, EntityDetail, useCatalog } from './catalog-page.js';
 import {
+  BackToList,
   Code,
   ErrorView,
   Field,
@@ -18,6 +19,7 @@ import {
   parse,
   useProfiles,
   useRun,
+  useSplitView,
   useWorkspace,
 } from './components.js';
 
@@ -65,6 +67,7 @@ export function SaveCase({ open, close, make }: { open: boolean; close: () => vo
 }
 
 export function ApiPage() {
+  const pane = useSplitView();
   const { lang, t, refresh, notify, command, projectId } = useWorkspace();
   const list = useCatalog('api');
   const profiles = useProfiles();
@@ -119,6 +122,7 @@ export function ApiPage() {
     }
   }
   function choose(entity: Entity) {
+    pane.reveal();
     const sequence = ++draftSequence.current;
     void safely(async () => {
       const draft = await command<HttpRequest>('api draft', { id: entity.id });
@@ -126,14 +130,15 @@ export function ApiPage() {
     });
   }
   return (
-    <div className="split">
-      <div className="stack">
+    <div className="split detail-split">
+      <div ref={pane.listRef} className="stack list-anchor" tabIndex={-1}>
         <div className="toolbar">
           <Button
             onClick={() => {
               draftSequence.current++;
               list.setSelected('');
               update({ method: 'GET' });
+              pane.reveal();
             }}
           >
             {t('manual')}
@@ -141,6 +146,9 @@ export function ApiPage() {
           <Button onClick={() => setImporting(true)}>{t('importApi')}</Button>
         </div>
         <CatalogList list={list} choose={choose} />
+      </div>
+      <div ref={pane.detailRef} className="stack list-detail" tabIndex={-1}>
+        <BackToList onClick={pane.back} />
         {list.detail.data && <EntityDetail entity={list.detail.data} />}
         {list.selected && (
           <Space wrap>
@@ -159,8 +167,6 @@ export function ApiPage() {
             ))}
           </Space>
         )}
-      </div>
-      <div className="stack">
         <ErrorView error={error} />
         <Card size="small" title={t('request')}>
           <div className="stack">

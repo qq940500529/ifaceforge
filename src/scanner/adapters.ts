@@ -1,10 +1,16 @@
 import { basename, dirname, posix } from 'node:path';
 import { existsSync } from 'node:fs';
+import { parse as jsonc } from 'jsonc-parser';
+import { parse as toml } from 'smol-toml';
 import { digest, projectFile, protectedSource, type ScanSource } from '../app/files.js';
-import type { Adapter } from '../app/config.js';
+import type { Adapter, SourceConfig } from '../app/config.js';
 import { apiId, mcpId, type Diagnostic, type Observation } from './model.js';
 import { scanMcpSource } from './mcp-discovery.js';
 import { scanExpressSource } from './express.js';
+import { scanPythonHttp } from './python-http.js';
+import type { pythonConstants } from './python-constants.js';
+import { scanPythonMcp } from './mcp-python.js';
+import { mcpLanguageFile, scanMcpLanguage } from './mcp-languages.js';
 import { mapping, yamlDocument } from './openapi.js';
 
 export function parseSkill(
@@ -88,14 +94,19 @@ export function parseMcpConfig(
   diagnostics: Diagnostic[],
   service?: string,
 ): Observation[] {
-  return Object.entries(mapping(mapping(value).mcpServers)).flatMap(([name, raw]) => {
+  const document = mapping(value);
+  const servers = mapping(document.mcpServers ?? document.servers ?? document.mcp_servers);
+  return Object.entries(servers).flatMap(([name, raw]) => {
     const entry = mapping(raw);
+    const launch = Object.values(mapping(entry.launch))
+      .map(mapping)
+      .find((target) => typeof target.command === 'string');
     const transport =
       typeof entry.url === 'string'
         ? entry.type === 'sse' || entry.transport === 'sse'
           ? 'sse'
           : 'streamableHttp'
-        : typeof entry.command === 'string'
+        : typeof entry.command === 'string' || launch
           ? 'stdio'
           : null;
     if (!transport) {
@@ -117,6 +128,18 @@ export function parseMcpConfig(
   });
 }
 
+export const mcpConfigName =
+  /(?:^|\/)(?:\.mcp\.(?:jsonc?|toml|ya?ml)|mcp\.(?:jsonc?|toml|ya?ml)|\.codex\/config\.toml)$/i;
+
+export function mcpConfigDocument(path: string, text: string) {
+  if (/\.toml$/i.test(path)) return toml(text);
+  if (/\.ya?ml$/i.test(path)) return yamlDocument(text).value;
+  const errors: Parameters<typeof jsonc>[1] = [];
+  const value: unknown = jsonc(text.replace(/^\uFEFF/, ''), errors, { allowTrailingComma: true });
+  if (errors.length) throw Error('Invalid MCP configuration at offset ' + errors[0].offset);
+  return value;
+}
+
 const extensions = /\.(?:[cm]?[jt]sx?)$/i;
 const pythonPattern = /^\s*@[\w.]+\.(get|post|put|patch|delete|options|head|trace)\s*\(\s*(['"])([^'"\r\n]+)\2/;
 
@@ -126,25 +149,10 @@ function pythonSource(
   service: string,
   diagnostics: Diagnostic[],
   checkpoint?: () => void,
+  constants?: ReturnType<typeof pythonConstants>,
 ) {
-  const observations: Observation[] = [];
+  const observations = scanPythonHttp(path, text, service, diagnostics, checkpoint, constants);
   const lines = text.split(/\r?\n/);
-  const handler = lines.findIndex((line) =>
-    /^\s*(?:class\s+\w+\([^)]*\b(?:BaseHTTPRequestHandler|SimpleHTTPRequestHandler)\b|def\s+do_(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s*\()/.test(
-      line,
-    ),
-  );
-  const dispatch = /\b([A-Za-z_]\w*)\.command\b/.exec(text);
-  if (handler >= 0 || (dispatch && new RegExp('\\b' + dispatch[1] + '\\.path\\b').test(text))) {
-    const dispatchLine = lines.findIndex((line) => /^\s*(?:async\s+)?def\s+\w*dispatch\w*\s*\(/.test(line));
-    const definition = dispatchLine >= 0 ? dispatchLine : handler;
-    diagnostics.push({
-      path,
-      line: definition >= 0 ? definition + 1 : text.slice(0, dispatch!.index).split('\n').length,
-      code: 'HTTP_HANDLER_UNRESOLVED',
-      message: 'Custom Python HTTP dispatch has route branches outside static FastAPI discovery',
-    });
-  }
   if (!/^\s*(?:from\s+fastapi(?:\.\w+)*\s+import\b|import\s+fastapi\b)/m.test(text)) return observations;
   for (const [index, line] of lines.entries()) {
     if (index % 256 === 0) checkpoint?.();
@@ -176,22 +184,30 @@ function pythonSource(
   return observations;
 }
 
-export function scanSource(
+export async function scanSource(
   path: string,
   text: string,
   adapters: Adapter[],
   service: string,
   diagnostics: Diagnostic[],
   checkpoint?: () => void,
+  rules?: SourceConfig['mcpRules'],
+  constants?: ReturnType<typeof pythonConstants>,
 ) {
   const observations: Observation[] = [];
-  if (/\.py$/i.test(path) && adapters.includes('fastapi'))
-    return pythonSource(path, text, service, diagnostics, checkpoint);
+  if (/\.py$/i.test(path)) {
+    if (adapters.includes('fastapi'))
+      observations.push(...pythonSource(path, text, service, diagnostics, checkpoint, constants));
+    if (adapters.includes('mcp-source'))
+      observations.push(...scanPythonMcp(path, text, service, diagnostics, checkpoint));
+  }
   if (extensions.test(path)) {
     if (adapters.includes('express'))
       observations.push(...scanExpressSource(path, text, service, diagnostics, checkpoint));
-    if (adapters.includes('mcp-typescript'))
+    if (adapters.includes('mcp-typescript') || adapters.includes('mcp-source'))
       observations.push(...scanMcpSource(path, text, service, diagnostics, checkpoint));
   }
+  if (adapters.includes('mcp-source') && (mcpLanguageFile(path) || rules?.length))
+    observations.push(...(await scanMcpLanguage(path, text, service, diagnostics, checkpoint, rules)));
   return observations;
 }

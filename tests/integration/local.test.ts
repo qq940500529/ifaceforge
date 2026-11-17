@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { setTimeout as delay } from 'node:timers/promises';
+import { McpSession, type Discovery } from '../../src/protocols/mcp.js';
+import { Bindings, type Profile } from '../../src/protocols/variables.js';
 import { address, close, fixture, ifg, ifgStdin, repositoryRoot, type Output } from '../support/fixture.js';
 // @ts-expect-error JavaScript fixture is also runnable directly from Node.
 import { taskApp } from '../../fixtures/express/app.mjs';
@@ -149,180 +150,31 @@ it('scans both frameworks, imports runtime routes and runs HTTP cases entirely t
 }, 60000);
 
 for (const transport of ['stdio', 'streamableHttp'] as const) {
-  for (const legacy of [false, true]) {
-    it('discovers and calls MCP ' + transport + ' ' + (legacy ? '2025-11-25' : '2026-07-28'), async () => {
-      const { root, write } = project();
-      const fixturePath = join(repositoryRoot, 'fixtures', 'express', 'mcp.mjs');
-      const mcp =
+  it('negotiates MCP 2026-07-28 over ' + transport, async () => {
+    const { root } = project();
+    const config: Profile = {
+      schemaVersion: 1,
+      id: 'sample',
+      name: 'Sample',
+      mcp:
         transport === 'stdio'
-          ? { transport, command: process.execPath, args: [fixturePath, 'stdio', legacy ? 'legacy' : 'modern'] }
-          : { transport, url: (await listen(mcpHttp(legacy))) + '/mcp' };
-      const connect = { schemaVersion: 1, id: 'sample', name: 'Sample', mcp };
-      check(await ifg(root, 'profile', 'put', '--file', write('mcp-profile.json', connect)));
-      const batch = {
-        schemaVersion: 1,
-        steps: [
-          { id: 'find', type: 'discover' },
-          {
-            id: 'first',
-            type: 'call',
-            tool: 'remember',
-            arguments: { value: 'connected' },
-            extract: { text: '/value' },
-          },
-          {
-            id: 'second',
-            type: 'call',
-            tool: transport === 'stdio' ? 'recall' : 'echo',
-            arguments: transport === 'stdio' ? {} : { value: '{{text}}' },
-          },
-          { id: 'resource', type: 'read', uri: 'task://42' },
-          { id: 'prompt', type: 'prompt', name: 'task-summary', arguments: { title: '{{text}}' } },
-          { id: 'error', type: 'call', tool: 'reject', arguments: {} },
-          {
-            id: 'template',
-            type: 'template',
-            uriTemplate: 'task://{id}',
-            arguments: { id: '43' },
-            assertions: [{ type: 'textContains', pointer: '/contents/0/text', text: 'Synthetic task' }],
-          },
-        ],
-      };
-      const result = check(
-        await ifg(root, 'mcp', 'batch', '--profile', 'sample', '--file', write('batch.json', batch)),
-      );
-      expect(result.steps[0].result.protocolVersion).toBe(legacy ? '2025-11-25' : '2026-07-28');
-      expect(result.steps[0].result.groups[0].items.map((tool: { name: string }) => tool.name)).toContain('slow');
-      expect(result.steps[2].result.structuredContent.value).toBe('connected');
-      expect(result.steps[3].result.contents[0].text).toContain('Sample task');
-      expect(result.steps[4].result.messages[0].content.text).toContain('connected');
-      expect(result.steps[5].result.isError).toBe(true);
-      expect(result.steps[6]).toMatchObject({
-        status: 'passed',
-        request: { type: 'template', uri: 'task://43' },
-        checks: [{ passed: true, expected: 'Synthetic task' }],
-      });
-      if (!legacy) {
-        const saved = [
-          {
-            id: 'tool-case',
-            request: { type: 'call', tool: 'echo', arguments: { value: 'case result' } },
-            assertions: [{ type: 'jsonEquals', pointer: '/value', equals: 'case result' }],
-          },
-          {
-            id: 'resource-case',
-            request: { type: 'read', uri: 'task://42' },
-            assertions: [{ type: 'textContains', pointer: '/contents/0/text', text: 'Sample task' }],
-          },
-          {
-            id: 'template-case',
-            request: { type: 'template', uriTemplate: 'task://{id}', arguments: { id: '43' } },
-            assertions: [{ type: 'jsonEquals', pointer: '/contents/0/uri', equals: 'task://43' }],
-          },
-          {
-            id: 'prompt-case',
-            request: { type: 'prompt', name: 'task-summary', arguments: { title: 'shared case' } },
-            assertions: [{ type: 'textContains', pointer: '/messages/0/content/text', text: 'shared case' }],
-          },
-        ];
-        for (const item of saved)
-          check(
-            await ifg(
-              root,
-              'case',
-              'put',
-              '--file',
-              write(item.id + '.json', {
-                schemaVersion: 1,
-                kind: 'mcp',
-                profile: 'sample',
-                name: item.id,
-                ...item,
-              }),
-            ),
-          );
-        check(
-          await ifg(
-            root,
-            'suite',
-            'put',
-            '--file',
-            write('mcp-suite.json', {
-              schemaVersion: 1,
-              id: 'mcp-suite',
-              name: 'MCP suite',
-              caseIds: saved.map((item) => item.id),
-            }),
-          ),
-        );
-        expect(
-          check(await ifg(root, 'test', 'run', '--suite', 'mcp-suite')).steps.map(
-            (step: { status: string }) => step.status,
-          ),
-        ).toEqual(Array(4).fill('passed'));
-        const assertions = write('assertions.json', [
-          { type: 'jsonEquals', pointer: '/value', equals: 'expected' },
-        ]);
-        const failed = await ifg(
-          root,
-          'mcp',
-          'call',
-          'echo',
-          '--profile',
-          'sample',
-          '--args',
-          '{"value":"actual"}',
-          '--assertions',
-          assertions,
-        );
-        expect(failed.exit).toBe(1);
-        expect(failed.result.data.steps[0].checks[0]).toMatchObject({
-          passed: false,
-          actual: 'actual',
-          expected: 'expected',
-        });
-        expect(check(await ifg(root, 'run', 'list', '--kind', 'mcp', '--profile', 'different')).total).toBe(0);
-      }
-      if (transport === 'stdio') {
-        const pid = result.steps[1].result.structuredContent.pid;
-        expect(result.steps[2].result.structuredContent.pid).toBe(pid);
-        expect(() => process.kill(pid, 0)).toThrow();
-      }
-    });
-  }
+          ? {
+              transport,
+              command: process.execPath,
+              args: [join(repositoryRoot, 'fixtures', 'express', 'mcp.mjs'), 'stdio', 'modern'],
+            }
+          : { transport, url: (await listen(mcpHttp())) + '/mcp' },
+    };
+    const session = await McpSession.connect(config, root, new Bindings(config));
+    try {
+      const inventory = (await session.execute({ type: 'discover' })) as Discovery;
+      expect(inventory.protocolVersion).toBe('2026-07-28');
+      expect(inventory.groups[0].items.map((tool) => tool.name)).toContain('slow');
+      expect(
+        await session.execute({ type: 'call', tool: 'echo', arguments: { value: 'protocol test' } }),
+      ).toMatchObject({ structuredContent: { value: 'protocol test' } });
+    } finally {
+      await session.close();
+    }
+  });
 }
-
-it('cancels a sent MCP request across processes and keeps the original unknown result', async () => {
-  const { root, write } = project();
-  check(
-    await ifg(
-      root,
-      'profile',
-      'put',
-      '--file',
-      write('profile.json', {
-        schemaVersion: 1,
-        id: 'sample',
-        name: 'Sample',
-        mcp: {
-          transport: 'stdio',
-          command: process.execPath,
-          args: [join(repositoryRoot, 'fixtures', 'express', 'mcp.mjs'), 'stdio'],
-        },
-      }),
-    ),
-  );
-  const running = ifg(root, 'mcp', 'call', 'slow', '--profile', 'sample');
-  let run;
-  for (let i = 0; i < 20; i++) {
-    run = check(await ifg(root, 'run', 'list')).items[0];
-    if (run?.phase === 'sent') break;
-    await delay(100);
-  }
-  expect(run?.phase).toBe('sent');
-  check(await ifg(root, 'run', 'cancel', run.id));
-  const canceled = await running;
-  expect(canceled.exit).toBe(4);
-  expect(canceled.result.data.status).toBe('unknown');
-  expect(check(await ifg(root, 'run', 'show', run.id)).status).toBe('unknown');
-});

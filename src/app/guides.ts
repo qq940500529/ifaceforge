@@ -16,6 +16,11 @@ export const guideRules = {
     category: 'coverage',
     fix: 'Publish OpenAPI for custom HTTP route dispatch or import the running service contract.',
   },
+  HTTP_ROUTE_UNDOCUMENTED: {
+    severity: 'warning',
+    category: 'coverage',
+    fix: 'Add the detected method and path to the appropriate OpenAPI contract if it belongs in the interface catalogue.',
+  },
   EXPRESS_SOURCE_PARSE: {
     severity: 'warning',
     category: 'coverage',
@@ -68,6 +73,15 @@ export const guideRules = {
   },
 } as const;
 
+export function describeDiagnostic(issue: Snapshot['diagnostics'][number]) {
+  const rule = guideRules[issue.code as keyof typeof guideRules];
+  return {
+    ...issue,
+    line: issue.line ?? (Number(/\bline (\d+)/.exec(issue.message)?.[1]) || undefined),
+    severity: rule?.severity ?? issue.severity ?? 'warning',
+  };
+}
+
 export function guide(locale: Locale = 'en') {
   const language = locale === 'zh-CN' ? locale : 'en';
   return {
@@ -83,12 +97,14 @@ export function guideDiagnostics(snapshot: Snapshot) {
     snapshot: snapshot.id,
     commit: snapshot.commit,
     complete: snapshot.complete,
-    issues: snapshot.diagnostics.map((issue) => ({
-      ...issue,
-      rule: issue.code,
-      line: issue.line ?? (Number(/\bline (\d+)/.exec(issue.message)?.[1]) || null),
-      ...guideRules[issue.code as keyof typeof guideRules],
-      severity: guideRules[issue.code as keyof typeof guideRules]?.severity ?? issue.severity ?? 'warning',
-    })),
+    issues: snapshot.diagnostics.map((issue) => {
+      const described = describeDiagnostic(issue);
+      return {
+        ...guideRules[issue.code as keyof typeof guideRules],
+        ...described,
+        rule: issue.code,
+        line: described.line ?? null,
+      };
+    }),
   };
 }

@@ -25,6 +25,8 @@ try {
   for (const file of [
     'cli.md',
     'cli-agent.md',
+    'mcp.md',
+    'mcp-discovery-plan.md',
     'release.md',
     'development-spec.md',
     'developer-guide.md',

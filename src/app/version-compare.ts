@@ -62,7 +62,7 @@ export async function browseVersion(
   signal?: AbortSignal,
 ): Promise<BrowseVersion> {
   const sha = await resolveCommit(project.root, ref, signal);
-  const snapshot = historical(project, repository, sha, effectiveConfig(project, repository).scan, options);
+  const snapshot = await historical(project, repository, sha, effectiveConfig(project, repository).scan, options);
   cancelled(options);
   return { ref, sha, snapshot: snapshot.id, complete: snapshot.complete };
 }
@@ -101,8 +101,8 @@ export async function compareVersions(
     ...options,
     progress: (progress) => options.progress?.({ ...progress, phase: side }),
   });
-  const before = historical(project, repository, effectiveBase, scan, phase('base'));
-  const after = historical(project, repository, targetSha, scan, phase('target'));
+  const before = await historical(project, repository, effectiveBase, scan, phase('base'));
+  const after = await historical(project, repository, targetSha, scan, phase('target'));
   cancelled(options);
   const files =
     effectiveBase === targetSha ? [] : await changedFiles(project.root, effectiveBase, targetSha, signal);

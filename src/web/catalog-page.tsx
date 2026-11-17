@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { copyText } from './client.js';
 import type { Diagnostic, Entity, Kind, Observation } from '../scanner/model.js';
 import {
+  BackToList,
   Code,
   EmptyView,
   ErrorView,
@@ -11,6 +12,7 @@ import {
   Markdown,
   TextButtonList,
   useLoad,
+  useSplitView,
   useWorkspace,
   type Listed,
 } from './components.js';
@@ -26,7 +28,9 @@ export function useCatalog(kind?: Kind) {
   const [selected, setSelected] = useState('');
   const results = useLoad(
     () =>
-      command<Listed<Entity> & { coverage?: { unresolved: number; examples: Diagnostic[] } }>('catalog list', {
+      command<
+        Listed<Entity> & { coverage?: { unresolved: number; undocumented: number; examples: Diagnostic[] } }
+      >('catalog list', {
         kind: kind ?? filter,
         query,
         offset,
@@ -147,7 +151,7 @@ export function CatalogList({
           </div>
         )}
         <ErrorView error={list.results.error} />
-        {!!coverage?.unresolved && (
+        {coverage && (coverage.unresolved > 0 || coverage.undocumented > 0) && (
           <Alert
             type="info"
             title={lang === 'zh-CN' ? 'API 源码覆盖提示' : 'API source coverage'}
@@ -155,8 +159,11 @@ export function CatalogList({
               <details>
                 <summary>
                   {lang === 'zh-CN'
-                    ? coverage.unresolved + ' 条路由诊断'
-                    : coverage.unresolved + ' route diagnostics'}
+                    ? coverage.unresolved + ' 条未解析路由诊断，' + coverage.undocumented + ' 个路由缺少契约'
+                    : coverage.unresolved +
+                      ' unresolved route diagnostics, ' +
+                      coverage.undocumented +
+                      ' routes without contracts'}
                 </summary>
                 <ul className="catalog-coverage-list">
                   {coverage.examples.map((issue, index) => (
@@ -169,6 +176,7 @@ export function CatalogList({
                       ) : (
                         issue.code
                       )}
+                      <Typography.Text type="secondary">{issue.message}</Typography.Text>
                     </li>
                   ))}
                 </ul>
@@ -180,6 +188,7 @@ export function CatalogList({
           <Loading />
         ) : (
           <TextButtonList
+            label={t('search')}
             items={list.results.data?.items ?? []}
             id={(entity) => entity.id}
             selected={list.selected}
@@ -327,13 +336,17 @@ export function EntityDetail({ entity }: { entity?: Entity }) {
 
 export function CatalogPage({ kind }: { kind?: Kind }) {
   const list = useCatalog(kind);
+  const pane = useSplitView();
   useEffect(() => {
     list.setSelected('');
   }, [kind]);
   return (
-    <div className="split">
-      <CatalogList list={list} expanded={!kind} />
-      <div className="stack">
+    <div className="split detail-split">
+      <div ref={pane.listRef} className="list-anchor" tabIndex={-1}>
+        <CatalogList list={list} expanded={!kind} choose={() => pane.reveal()} />
+      </div>
+      <div ref={pane.detailRef} className="stack list-detail" tabIndex={-1}>
+        {list.selected && <BackToList onClick={pane.back} />}
         <ErrorView error={list.detail.error} />
         <EntityDetail entity={list.detail.data} />
       </div>

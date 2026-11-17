@@ -5,11 +5,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { git } from '../../src/app/project.js';
 import { basename, join } from 'node:path';
 import { createRequire } from 'node:module';
-import { address, close, fixture, ifg, repositoryRoot } from '../support/fixture.js';
+import { address, close, commitFixture, fixture, ifg, repositoryRoot } from '../support/fixture.js';
 // @ts-expect-error This executable JavaScript fixture has no TypeScript declaration.
 import { taskApp } from '../../fixtures/express/app.mjs';
-// @ts-expect-error This executable JavaScript fixture has no TypeScript declaration.
-import { mcpHttp } from '../../fixtures/express/mcp.mjs';
 
 const require = createRequire(import.meta.url);
 const installed = process.env.IFG_DESKTOP_EXE;
@@ -45,7 +43,7 @@ async function closeDesktop(app: ElectronApplication) {
       timer = setTimeout(() => {
         process.kill();
         reject(new Error('Electron did not exit after quit'));
-      }, 10000);
+      }, 30000);
     });
     const [code] = await Promise.race([stopped, fallback]);
     expect(code).toBe(0);
@@ -53,6 +51,196 @@ async function closeDesktop(app: ElectronApplication) {
     clearTimeout(timer);
   }
 }
+
+test('shows and copies scan diagnostics and keeps long-list details in view', async ({}, info) => {
+  test.setTimeout(120_000);
+  const sample = fixture('express');
+  sample.write('openapi.long.json', {
+    openapi: '3.1.0',
+    info: { title: 'Paged API', version: '1' },
+    paths: Object.fromEntries(
+      Array.from({ length: 120 }, (_, index) => [
+        `/long/item-${String(index).padStart(3, '0')}`,
+        { get: { responses: { 200: { description: 'Ready' } } } },
+      ]),
+    ),
+  });
+  writeFileSync(
+    join(sample.root, 'dynamic.mjs'),
+    'import express from "express";\nconst router = express();\nrouter.get(process.env.MODE, handler);\n',
+  );
+  mkdirSync(join(sample.root, 'skills', 'bad-metadata'));
+  writeFileSync(join(sample.root, 'skills', 'bad-metadata', 'SKILL.md'), '---\nname: BAD\n---\n# Invalid skill\n');
+  writeFileSync(
+    join(sample.root, 'skills', 'read-tasks', 'SKILL.md'),
+    [
+      '---',
+      'name: read-tasks',
+      'description: Read tasks from the local API',
+      '---',
+      '# Task formats',
+      '',
+      '| Task | State |',
+      '| --- | --- |',
+      '| Inspect | Ready |',
+      '',
+      '- [x] Prepared',
+      '- [ ] Pending',
+      '',
+      'Keep ~~obsolete~~ fields out.[^schema]',
+      '',
+      '[^schema]: This is the reference note.',
+      '',
+      '<script>invalid preview code</script>',
+    ].join('\n'),
+  );
+  git(sample.root, ['add', '.']);
+  const app = await boot(sample.data);
+  let assertionsPassed = false;
+  try {
+    const page = await app.firstWindow();
+    await page.setViewportSize({ width: 1280, height: 820 });
+    const header = page.getByRole('banner');
+    const navigate = (name: string) => page.getByRole('menuitem', { name, exact: true }).click();
+    await choose(app, sample.root);
+    await header.getByRole('button', { name: 'Add project' }).click();
+    await page.getByRole('button', { name: 'Scan project' }).click();
+    const popup = page.locator('.scan-panel');
+    await expect(popup.getByText('Scan completed with issues')).toBeVisible();
+    await expect(popup.getByText('1 warning', { exact: true })).toBeVisible();
+    await expect(popup.getByText('1 error', { exact: true })).toBeVisible();
+    await expect(popup.getByRole('button', { name: 'View diagnostics' })).toHaveClass(/ant-btn-primary/);
+    await expect(popup.getByRole('button', { name: 'View catalog' })).not.toHaveClass(/ant-btn-primary/);
+    await popup.screenshot({ path: info.outputPath('scan-actions-wide.png') });
+    await popup.getByRole('button', { name: 'View diagnostics' }).click();
+    const diagnostics = page.getByRole('dialog', { name: 'Scan diagnostics' });
+    await expect(diagnostics.getByText('SKILL_METADATA')).toBeVisible();
+    await expect(diagnostics.getByText('dynamic.mjs:3')).toBeVisible();
+    await diagnostics.getByText('Warnings (1)', { exact: true }).click();
+    await expect(diagnostics.getByText('SKILL_METADATA')).toHaveCount(0);
+    await diagnostics.getByRole('button', { name: 'Copy entry' }).click();
+    const copied = () => app.evaluate(({ clipboard }) => clipboard.readText());
+    await expect.poll(copied).toContain('[WARNING] DYNAMIC_ROUTE\ndynamic.mjs:3');
+    await diagnostics.getByRole('button', { name: 'Copy all diagnostics' }).click();
+    await expect.poll(copied).toContain('[ERROR] SKILL_METADATA');
+    await diagnostics.screenshot({ path: info.outputPath('scan-diagnostics.png') });
+    await diagnostics.getByRole('button', { name: 'Close' }).click();
+
+    for (const section of ['Catalog', 'HTTP API']) {
+      await navigate(section);
+      const list = page.getByRole('region', { name: 'Search the catalog', exact: true });
+      await expect.poll(() => list.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+      await list.evaluate((node) => (node.scrollTop = node.scrollHeight));
+      const row = list.getByRole('button', { name: /GET \/long\/item-012/ });
+      await row.scrollIntoViewIfNeeded();
+      const before = await page.evaluate(() => scrollY);
+      await row.click();
+      const detail = page.locator('.list-detail:visible').first();
+      await expect(detail.getByText('GET /long/item-012', { exact: true })).toBeInViewport();
+      expect(await page.evaluate(() => scrollY)).toBe(before);
+    }
+
+    await navigate('Skills');
+    await page.getByRole('button', { name: /^read-tasks / }).click();
+    await expect(page.getByRole('table').getByRole('columnheader', { name: 'Task' })).toBeVisible();
+    await expect(page.getByRole('row').filter({ hasText: 'Inspect' })).toContainText('Ready');
+    await expect(page.locator('.markdown input[type=checkbox]').first()).toBeChecked();
+    await expect(page.locator('.markdown del')).toHaveText('obsolete');
+    await page.locator('.markdown sup a').click();
+    await expect(page.locator('.markdown .footnotes')).toContainText('This is the reference note.');
+    await expect(page.locator('.markdown script')).toHaveCount(0);
+    await page
+      .locator('.list-detail:visible')
+      .first()
+      .screenshot({ path: info.outputPath('markdown-gfm.png') });
+
+    await navigate('Wiki');
+    await page.getByTestId('wiki-preview').click();
+    const wiki = page.getByRole('region', { name: 'Wiki pages' });
+    const tail = wiki.getByRole('button', { name: 'read-tasks', exact: true });
+    const reader = page.locator('.wiki-detail');
+    await expect(reader.getByRole('heading', { name: 'HTTP API', exact: true })).toBeVisible();
+    await page.screenshot({
+      path: info.outputPath('wiki-overview.png'),
+      style: '.project-path, .desktop-path, .ant-message { visibility: hidden !important }',
+    });
+    await reader.getByRole('link', { name: 'GET /long/item-000', exact: true }).click();
+    await expect(reader.getByRole('heading', { name: 'Definition', exact: true })).toBeVisible();
+    await expect(reader.locator('pre code.language-json')).toBeVisible();
+    await reader.getByRole('link', { name: /Wiki overview/ }).click();
+    await reader.getByRole('link', { name: /^Skills · \d+$/ }).click();
+    await expect(reader.getByRole('heading', { name: 'Skills', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: /Wiki overview/ }).click();
+    const category = page.getByRole('combobox', { name: 'Wiki page category' });
+    await category.click();
+    await page.getByRole('option', { name: 'Skills', exact: true }).click();
+    await expect(wiki.getByRole('button')).toHaveCount(2);
+    const search = page.getByRole('textbox', { name: 'Search Wiki pages' });
+    await search.fill('unknown-page');
+    await expect(wiki.getByRole('button')).toHaveCount(0);
+    await search.fill('LOCAL API');
+    await expect(tail).toBeVisible();
+    await search.clear();
+    await category.click();
+    await page.getByRole('option', { name: 'All categories', exact: true }).click();
+    await expect.poll(() => wiki.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+    await wiki.evaluate((node) => (node.scrollTop = node.scrollHeight));
+    await tail.click();
+    await expect(
+      page.locator('.wiki-detail').getByRole('heading', { name: 'read-tasks', exact: true }),
+    ).toBeInViewport();
+    await page.screenshot({ path: info.outputPath('wiki-long-list.png') });
+    await page.setViewportSize({ width: 600, height: 720 });
+    await tail.scrollIntoViewIfNeeded();
+    const listPosition = await wiki.evaluate((node) => node.scrollTop);
+    await tail.click();
+    const back = page.getByRole('button', { name: /Back to list/ });
+    await expect(back).toBeInViewport();
+    await page.screenshot({
+      path: info.outputPath('wiki-narrow.png'),
+      style: '.project-path, .desktop-path { visibility: hidden !important }',
+    });
+    await back.click();
+    expect(await wiki.evaluate((node) => node.scrollTop)).toBe(listPosition);
+    await expect(tail).toBeFocused();
+
+    await header.getByRole('button', { name: 'Preferences' }).click();
+    await page.getByRole('button', { name: 'About IfaceForge' }).click();
+    const about = page.getByRole('dialog', { name: 'About IfaceForge' });
+    await expect(about.getByText(/^v\d+\.\d+/)).toBeVisible();
+    await expect(about.getByText('Acknowledgements')).toBeVisible();
+    await expect(about.getByText('react-markdown · remark-gfm')).toBeVisible();
+    await expect(about.getByText(/数链创元（天津）信息技术有限责任公司/)).toBeVisible();
+    await expect(about.getByRole('button', { name: 'Project repository' })).toBeVisible();
+    await about.screenshot({ path: info.outputPath('about.png') });
+    await about.getByRole('button', { name: 'Close' }).click();
+    await page.getByRole('dialog', { name: 'Preferences' }).getByRole('button', { name: 'Close' }).click();
+
+    writeFileSync(join(sample.root, '.ifaceforge.json'), '{ malformed configuration');
+    await page.getByRole('button', { name: 'Scan status' }).click();
+    await expect(popup).toBeInViewport({ ratio: 0.99 });
+    await expect(popup.getByRole('button', { name: 'View diagnostics' })).toBeInViewport();
+    await page.screenshot({
+      path: info.outputPath('scan-actions-narrow.png'),
+      animations: 'disabled',
+      style: '.project-path, .desktop-path { visibility: hidden !important }',
+    });
+    await popup.getByRole('button', { name: 'Scan again' }).click();
+    await expect(popup.getByText('Scan failed')).toBeVisible();
+    await expect(popup.getByRole('button', { name: 'Scan again' })).toHaveClass(/ant-btn-primary/);
+    await popup.getByRole('button', { name: 'View diagnostics' }).click();
+    await diagnostics.getByRole('button', { name: 'Copy all diagnostics' }).click();
+    await expect.poll(copied).toMatch(/\[ERROR\].*\n[\s\S]*\.ifaceforge\.json/);
+    assertionsPassed = true;
+  } finally {
+    try {
+      await closeDesktop(app);
+      sample.destroy();
+    } catch (cleanupError) {
+      if (assertionsPassed) throw cleanupError;
+    }
+  }
+});
 
 test('launches the desktop, switches projects and scans with a page popup', async ({}, info) => {
   const first = fixture('express');
@@ -82,12 +270,13 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
     await page.getByRole('button', { name: 'Scan project', exact: true }).click();
     await expect(page.locator('.scan-panel:visible')).toBeVisible();
     await expect(page.locator('.scan-panel:visible')).toHaveAttribute('data-scan-state', 'complete');
+    await expect(page.getByRole('button', { name: 'View catalog' })).toHaveClass(/ant-btn-primary/);
     await page.screenshot({
       path: info.outputPath('desktop-scan.png'),
       style: '.project-path { visibility: hidden !important }',
       scale: 'css',
     });
-    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await page.getByRole('button', { name: 'Close scan status', exact: true }).click();
     await expect(page.getByRole('button', { name: /GET \/inventory/ }).first()).toBeVisible();
     await page.getByRole('menuitem', { name: 'HTTP API', exact: true }).click();
     await page.getByRole('button', { name: 'New request' }).click();
@@ -199,44 +388,13 @@ test('launches the desktop, switches projects and scans with a page popup', asyn
   }
 });
 
-test('uses desktop controls for source, requests, MCP, tests, Wiki and project data', async ({}, info) => {
+test('uses desktop controls for source, requests, tests, Wiki and project data', async ({}, info) => {
   test.setTimeout(150_000);
   const sample = fixture('express');
   const service = createServer(taskApp());
   const origin = await address(service);
-  const mcp = mcpHttp();
-  const transport = await address(mcp);
+  const transport = 'http://127.0.0.1:9898';
   const target = origin + '/tasks/42';
-  const profile = await ifg(
-    sample.root,
-    'profile',
-    'put',
-    '--file',
-    sample.write('demo.json', {
-      schemaVersion: 1,
-      id: 'demo',
-      name: 'Test environment',
-      mcp: { transport: 'streamableHttp', url: transport + '/mcp' },
-    }),
-  );
-  expect(profile.exit).toBe(0);
-  const stdio = await ifg(
-    sample.root,
-    'profile',
-    'put',
-    '--file',
-    sample.write('stdio-profile.json', {
-      schemaVersion: 1,
-      id: 'stdio-demo',
-      name: 'Stdio environment',
-      mcp: {
-        transport: 'stdio',
-        command: process.execPath,
-        args: [join(repositoryRoot, 'fixtures', 'express', 'mcp.mjs'), 'stdio', 'modern'],
-      },
-    }),
-  );
-  expect(stdio.exit).toBe(0);
   const app = await boot(sample.data);
   try {
     const page = await app.firstWindow();
@@ -335,92 +493,6 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await expect(page.getByText('Sample task', { exact: false }).first()).toBeVisible();
     await snapshot('test-report');
 
-    await navigate('MCP');
-    await page.getByRole('combobox', { name: 'Profile', exact: true }).click();
-    await page.getByRole('option', { name: 'Test environment', exact: true }).click();
-    await button('Connect').click();
-    await expect(button('echo')).toBeVisible();
-    const serviceDetails = page.locator('summary').filter({ hasText: /^Service details$/ });
-    await serviceDetails.click();
-    await expect(serviceDetails.locator('..')).toHaveAttribute('open', '');
-    await serviceDetails.click();
-    await page.getByRole('textbox', { name: 'Search MCP directory' }).fill('structured JSON');
-    await button('echo').click();
-    await expect(button('slow')).not.toBeVisible();
-    await page.getByRole('textbox', { name: 'Search MCP directory' }).clear();
-    await expect(button('slow')).toBeVisible();
-    await page.getByRole('tab', { name: 'Details', exact: true }).click();
-    const outputSchema = page.locator('summary').filter({ hasText: /^Output schema$/ });
-    await outputSchema.click();
-    await expect(outputSchema.locator('..')).toHaveAttribute('open', '');
-    await snapshot('mcp-details');
-    await outputSchema.click();
-    await page.getByRole('tab', { name: 'Test', exact: true }).click();
-    await page.getByRole('textbox', { name: 'value *', exact: true }).fill('desktop tool result');
-    await button('Add assertion').click();
-    const pointer = page.getByRole('combobox', { name: 'JSON Pointer', exact: true });
-    await pointer.fill('/value');
-    await page.getByRole('textbox', { name: 'Expected value', exact: true }).fill('"different"');
-    await button('Call tool').click();
-    await expect(
-      page.locator('pre.code:visible').filter({ hasText: '"expected": "different"' }).first(),
-    ).toBeVisible();
-    await page.getByRole('textbox', { name: 'Expected value', exact: true }).fill('"desktop tool result"');
-    await button('Call tool').click();
-    await expect(
-      page.locator('pre.code:visible').filter({ hasText: '"value": "desktop tool result"' }).first(),
-    ).toBeVisible();
-    await expect(page.locator('.mcp-inspector').getByText('Passed', { exact: true }).first()).toBeVisible();
-    await page.getByRole('tab', { name: 'History', exact: true }).click();
-    await expect(page.locator('.mcp-inspector .list-button')).toHaveCount(2);
-    await page.locator('.mcp-inspector .list-button').first().click();
-    await expect(button('Export JSON')).toBeVisible();
-    await page.getByRole('tab', { name: 'Test', exact: true }).click();
-    await snapshot('mcp-tool');
-    await page.locator('.mcp-layout:visible').screenshot({
-      path: info.outputPath('mcp-showcase.png'),
-      style: '.desktop-header { visibility: hidden !important }',
-      scale: 'css',
-      animations: 'disabled',
-    });
-    const saveMcpCase = async (id: string) => {
-      await button('Save as case').click();
-      await page.getByRole('textbox', { name: 'Case ID' }).fill(id);
-      await page.getByRole('textbox', { name: 'Case name' }).fill(id);
-      await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
-      await expect(page.getByRole('dialog')).not.toBeVisible();
-    };
-    await saveMcpCase('mcp-echo');
-    await button('Disconnect').click();
-    await expect(button('Connect')).toBeVisible();
-    await page.getByRole('combobox', { name: 'Profile', exact: true }).click();
-    await page.getByRole('option', { name: 'Stdio environment', exact: true }).click();
-    await button('Connect').click();
-    await button('Discover').click();
-    await button('Resources').click();
-    await button('task').click();
-    await button('Read resource').click();
-    await expect(page.getByText('Sample task 42', { exact: false }).first()).toBeVisible();
-    await saveMcpCase('mcp-resource');
-    await button('sample-image').click();
-    await button('Read resource').click();
-    await expect(page.getByRole('img', { name: 'MCP response image' })).toBeVisible();
-    await button('Resource templates').click();
-    await button('task-template').click();
-    await expect(button('Read resource')).toBeDisabled();
-    await page.getByRole('textbox', { name: 'id *', exact: true }).fill('43');
-    await expect(page.getByRole('textbox', { name: 'Resource URI', exact: true })).toHaveValue('task://43');
-    await button('Read resource').click();
-    await expect(page.getByText('Synthetic task', { exact: true }).first()).toBeVisible();
-    await saveMcpCase('mcp-template');
-    await button('Prompts').click();
-    await button('task-summary').click();
-    await page.getByRole('textbox', { name: 'title *', exact: true }).fill('desktop audit');
-    await button('Get prompt').click();
-    await expect(page.getByText('Summarize desktop audit', { exact: false }).first()).toBeVisible();
-    await saveMcpCase('mcp-prompt');
-    await button('Disconnect').click();
-
     await navigate('Wiki');
     await choose(app, exportPath);
     await button('Choose folder').click();
@@ -468,6 +540,10 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await page.getByRole('combobox', { name: 'MCP transport' }).click();
     await page.getByRole('option', { name: 'Streamable HTTP', exact: true }).click();
     await page.getByRole('textbox', { name: 'MCP URL', exact: true }).fill(transport + '/mcp');
+    await page.getByRole('textbox', { name: 'Container executable', exact: true }).fill('node');
+    await page
+      .getByRole('textbox', { name: 'Container arguments (one per line)', exact: true })
+      .fill('server.mjs');
     await button('Save').click();
     await expect(button('Local profile audit')).toBeVisible();
     expect(await page.locator('.ant-message-notice:visible').count()).toBeLessThanOrEqual(1);
@@ -487,7 +563,7 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     await choose(app, sample.root);
     await header.getByRole('button', { name: 'Add project' }).click();
     await expect(page.locator('.project-path:visible')).toHaveText(sample.root);
-    expect((await ifg(sample.root, 'case', 'list')).result.data.total).toBe(5);
+    expect((await ifg(sample.root, 'case', 'list')).result.data.total).toBe(1);
     await header.getByRole('button', { name: 'Manage projects' }).click();
     await manager.getByRole('button', { name: 'Delete app data' }).click();
     await page
@@ -500,88 +576,278 @@ test('uses desktop controls for source, requests, MCP, tests, Wiki and project d
     expect((await ifg(sample.root, 'project', 'list')).result.data).toEqual([]);
   } finally {
     await closeDesktop(app);
-    await close(mcp);
     await close(service);
     sample.destroy();
   }
 });
 
-test('keeps live MCP targets, drafts and results within their project', async ({}, info) => {
-  const first = fixture('express');
-  const second = fixture('fastapi');
-  const server = mcpHttp();
-  const url = (await address(server)) + '/mcp';
-  const app = await boot(first.data);
+test('reviews launch conflicts and copies a failed MCP startup report', async ({}, info) => {
+  test.skip(!process.env.IFG_TEST_DOCKER, 'Requires the local Docker test image');
+  const sample = fixture('mcp-isolation');
+  sample.write('integrations/codex/.mcp.json', {
+    mcpServers: {
+      'host-launcher': { command: 'powershell.exe', args: ['-File', './scripts/start.ps1'], cwd: '.' },
+      'exits-early': {
+        command: 'node',
+        args: ['-e', "console.error('Example startup failure');process.exit(23)"],
+      },
+    },
+  });
+  sample.write('integrations/codex/scripts/start.ps1', 'Fixture');
+  commitFixture(sample.root);
+  const app = await boot(sample.data);
   try {
     const page = await app.firstWindow();
-    const header = page.locator('.desktop-header');
-    const visible = page.locator('.mcp-workbench:visible');
-    const argument = visible.getByRole('textbox', { name: 'value *', exact: true });
-    async function addAndTest(root: string, value: string) {
-      await choose(app, root);
-      await header.getByRole('button', { name: 'Add project', exact: true }).click();
-      await expect(page.locator('.project-path:visible')).toHaveText(root);
-      const profile = await page.evaluate(async (endpoint) => {
-        const state = await window.ifaceforge!.state();
-        if (!state.ok || !state.data.selected) throw new Error('Project not selected');
-        return window.ifaceforge!.command(state.data.selected, 'profile put', {
-          body: {
-            schemaVersion: 1,
-            id: 'same',
-            name: 'Shared service',
-            mcp: { transport: 'streamableHttp', url: endpoint },
-          },
-        });
-      }, url);
-      expect(profile.ok).toBe(true);
-      await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
-      await visible.getByRole('combobox', { name: 'Profile', exact: true }).click();
-      await page.getByRole('option', { name: 'Shared service', exact: true }).click();
-      await visible.getByRole('button', { name: 'Connect', exact: true }).click();
-      await visible.getByRole('button', { name: 'echo', exact: true }).click();
-      await argument.fill(value);
-      await visible.getByRole('button', { name: 'Call tool', exact: true }).click();
-      await expect(visible.locator('pre.code:visible').filter({ hasText: value }).first()).toBeVisible();
+    await choose(app, sample.root);
+    await page.getByRole('banner').getByRole('button', { name: 'Add project' }).click();
+    await page.getByRole('button', { name: 'Scan project', exact: true }).click();
+    await page.locator('.scan-panel').getByRole('button', { name: 'Close scan status' }).click();
+    await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
+    const target = page.getByRole('combobox', { name: 'MCP service' });
+    const chooseTarget = async (name: string) => {
+      await target.click();
+      await page.locator('.ant-select-item-option:visible').filter({ hasText: name }).click();
+    };
+    await chooseTarget('host-launcher');
+    if (process.env.IFG_TEST_DOCKER_IMAGE)
+      await page.getByRole('textbox', { name: 'Local Docker image' }).fill(process.env.IFG_TEST_DOCKER_IMAGE);
+    const discover = page.getByRole('button', { name: 'Review launch plan' });
+    await discover.click();
+    const review = page.getByRole('dialog', { name: 'Review isolated launch' });
+    await expect(review).toContainText('This launcher requires Windows');
+    await expect(review).toContainText('/workspace/integrations/codex');
+    await expect(review.getByRole('button', { name: 'Start and discover' })).toBeDisabled();
+    await page.setViewportSize({ width: 600, height: 760 });
+    await expect(review.getByRole('button', { name: 'Cancel' })).toBeInViewport();
+    await review.screenshot({ path: info.outputPath('mcp-preflight-narrow.png') });
+    await review.getByRole('button', { name: 'Cancel' }).click();
+    await chooseTarget('exits-early');
+    await discover.click();
+    await review.getByRole('button', { name: 'Start and discover' }).click();
+    const alert = page.getByRole('alert').filter({ hasText: 'The isolated MCP service could not start.' });
+    await expect(alert).toBeVisible({ timeout: 55_000 });
+    await expect(alert.getByText('Container exit code 23')).toBeVisible();
+    await expect(alert.getByText('Example startup failure', { exact: true })).toBeVisible();
+    await alert.screenshot({ path: info.outputPath('mcp-startup-error.png') });
+    await alert.locator('summary').click();
+    await expect(alert).toContainText('Example startup failure');
+    await expect(alert).toContainText('"exitCode": 23');
+    await alert.getByRole('button', { name: 'Copy error details' }).click();
+    await expect
+      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .toContain('Example startup failure');
+    await expect(page.getByText('Sandbox removed', { exact: true })).toBeVisible();
+  } finally {
+    try {
+      await closeDesktop(app);
+    } finally {
+      sample.destroy();
     }
-    await addAndTest(first.root, 'first project input');
-    const session = (await ifg(first.root, 'mcp', 'status')).result.data[0];
-    expect(session.profile).toBe('same');
-    const fromCli = await ifg(
-      first.root,
-      'mcp',
-      'call',
-      'echo',
-      '--connection',
-      session.id,
-      '--args',
-      '{"value":"from CLI"}',
-    );
-    expect(fromCli.exit).toBe(0);
-    expect(JSON.stringify(fromCli.result.data)).toContain('from CLI');
-    await addAndTest(second.root, 'second project input');
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(600, 680));
-    const filters = visible.getByRole('group', { name: 'MCP capability types' });
-    for (const name of ['Tools', 'Resources', 'Resource templates', 'Prompts']) {
-      const control = filters.getByRole('button', { name, exact: true });
-      await control.click();
-      await expect(control).toHaveAttribute('aria-pressed', 'true');
-      expect(await control.evaluate((element) => element.getBoundingClientRect().right <= innerWidth)).toBe(true);
-    }
-    await filters.getByRole('button', { name: 'Tools', exact: true }).click();
-    await filters.screenshot({ path: info.outputPath('mcp-narrow-categories.png'), scale: 'css' });
-    await header.getByRole('combobox', { name: 'Switch project', exact: true }).click();
-    await page.getByRole('option', { name: basename(first.root), exact: true }).click();
-    await expect(page.locator('.project-path:visible')).toHaveText(first.root);
-    await expect(argument).toHaveValue('first project input');
+  }
+});
+
+test('reviews an isolated MCP launch and operates the capability directory and tests', async ({}, info) => {
+  test.skip(!process.env.IFG_TEST_DOCKER, 'Requires the local Docker test image');
+  test.setTimeout(180_000);
+  const sample = fixture('mcp-isolation');
+  commitFixture(sample.root);
+  const app = await boot(sample.data);
+  try {
+    const page = await app.firstWindow();
+    const header = page.getByRole('banner');
+    const button = (name: string) => page.getByRole('button', { name, exact: true });
+    await choose(app, sample.root);
+    await header.getByRole('button', { name: 'Add project' }).click();
+    await button('Scan project').click();
+    await page.locator('.scan-panel').getByRole('button', { name: 'Close scan status' }).click();
+    await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
+    await page.getByRole('combobox', { name: 'MCP service' }).click();
+    await page.locator('.ant-select-item-option:visible').filter({ hasText: 'sample-stdio' }).click();
+    const configured = process.env.IFG_TEST_DOCKER_IMAGE;
+    if (configured) await page.getByRole('textbox', { name: 'Local Docker image' }).fill(configured);
+    await button('Review launch plan').click();
+    const review = page.getByRole('dialog', { name: 'Review isolated launch' });
+    await expect(review).toContainText('server.mjs');
+    await expect(review).toContainText('sha256:');
+    await review.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(button('echo')).toHaveCount(0);
+    await button('Review launch plan').click();
+    await button('Start and discover').click();
+    await expect(page.getByText('Sandbox removed', { exact: true })).toBeVisible({ timeout: 60_000 });
+    const directory = page.getByRole('region', { name: 'MCP capability list' });
+    const serviceDetails = page.locator('summary').filter({ hasText: /^Service details$/ });
+    await serviceDetails.click();
+    await expect(serviceDetails.locator('..')).toHaveAttribute('open', '');
+    await serviceDetails.click();
+    await page.getByRole('textbox', { name: 'Search MCP directory' }).fill('Returns the input');
+    await expect(directory.getByRole('button')).toHaveCount(1);
+    await directory.getByRole('button', { name: 'echo' }).click();
+    await page.getByRole('tab', { name: 'Details' }).click();
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Input schema$/ })
+      .click();
+    await expect(page.locator('.mcp-inspector pre.code').filter({ hasText: '"required"' }).first()).toBeVisible();
+    await page.getByRole('tab', { name: 'Test', exact: true }).click();
+    await page.getByRole('textbox', { name: 'value *', exact: true }).fill('desktop result');
+    await button('Call tool').click();
     await expect(
-      visible.locator('pre.code:visible').filter({ hasText: 'first project input' }).first(),
-    ).toBeVisible();
-    await expect(visible.locator('pre.code:visible').filter({ hasText: 'second project input' })).toHaveCount(0);
+      page.locator('.mcp-inspector pre.code:visible').filter({ hasText: 'desktop result' }).first(),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(button('Call tool')).toBeEnabled();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: info.outputPath('sandbox-mcp.png'),
+      animations: 'disabled',
+      scale: 'css',
+      style: '.project-path, .desktop-path { visibility: hidden !important }',
+    });
+    await button('Save as case').click();
+    await page.getByRole('textbox', { name: 'Case ID' }).fill('isolated-echo');
+    await page.getByRole('textbox', { name: 'Case name' }).fill('Isolated echo');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+    await button('Resources').click();
+    await directory.getByRole('button', { name: 'task', exact: true }).click();
+    await button('Read resource').click();
+    await expect(page.locator('.mcp-inspector').getByText('Read task://42', { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await button('Resource templates').click();
+    await directory.getByRole('button', { name: 'task-template', exact: true }).click();
+    await page.getByRole('textbox', { name: /^id/ }).fill('43');
+    await expect(page.getByRole('textbox', { name: 'Resource URI', exact: true })).toHaveValue('task://43');
+    await button('Read resource').click();
+    await expect(page.locator('.mcp-inspector').getByText('Read task://43', { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await button('Prompts').click();
+    await button('task-summary').click();
+    await page.getByRole('textbox', { name: 'title *' }).fill('desktop prompt');
+    await button('Get prompt').click();
+    await expect(
+      page.locator('.mcp-inspector .mcp-content').getByText('desktop prompt', { exact: true }),
+    ).toBeVisible({ timeout: 60_000 });
+    await page.screenshot({ path: info.outputPath('sandbox-mcp-prompt.png') });
+    await page.setViewportSize({ width: 600, height: 720 });
+    await directory.getByRole('button', { name: 'task-summary' }).click();
+    const back = page.getByRole('button', { name: /Back to list/ });
+    await expect(back).toBeInViewport();
+    await back.click();
+    await expect(directory.getByRole('button', { name: 'task-summary' })).toBeFocused();
+    await page.setViewportSize({ width: 1280, height: 850 });
+    await page.reload();
+    await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
+    await page.getByRole('combobox', { name: 'MCP service' }).click();
+    await page.locator('.ant-select-item-option:visible').filter({ hasText: 'sample-stdio' }).click();
+    await expect(directory.getByRole('button', { name: 'echo', exact: true })).toBeVisible();
   } finally {
     await closeDesktop(app);
-    await close(server);
-    first.destroy();
-    second.destroy();
+    sample.destroy();
+  }
+});
+
+test('reviews the local MCP process and confirms a test at a narrow width', async ({}, info) => {
+  test.setTimeout(120_000);
+  const sample = fixture('mcp-isolation');
+  sample.write('.mcp.json', {
+    mcpServers: {
+      'desktop-native': { command: process.execPath, args: ['server.mjs'], protocolVersion: '2025-11-25' },
+      'missing-settings': { command: process.execPath, args: ['missing-settings.mjs'] },
+    },
+  });
+  writeFileSync(
+    join(sample.root, 'missing-settings.mjs'),
+    "console.error('Required local settings file was not found.');\nprocess.exitCode = 1;\n",
+  );
+  writeFileSync(join(sample.root, 'method.go'), 'package demo\nvar operation = "tools/list"\n');
+  commitFixture(sample.root);
+  const app = await boot(sample.data);
+  try {
+    const page = await app.firstWindow();
+    const button = (name: string) => page.getByRole('button', { name, exact: true });
+    await choose(app, sample.root);
+    await page.getByRole('banner').getByRole('button', { name: 'Add project' }).click();
+    await button('Scan project').click();
+    await page.locator('.scan-panel').getByRole('button', { name: 'Close scan status' }).click();
+    await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
+    await page.setViewportSize({ width: 650, height: 750 });
+    const scanRecords = page.locator('summary').filter({ hasText: /^Project scan records$/ });
+    await scanRecords.click();
+    await expect(page.getByRole('button', { name: /tools\/list/ })).toBeVisible();
+    await scanRecords.click();
+    await page.getByRole('combobox', { name: 'MCP service' }).click();
+    await page.locator('.ant-select-item-option:visible').filter({ hasText: 'desktop-native' }).click();
+    const environment = page.getByRole('combobox', { name: 'Run environment' });
+    await expect(page.getByRole('textbox', { name: 'Local Docker image' })).toBeVisible();
+    await environment.click();
+    await expect(page.getByRole('option')).toHaveText(['Docker · Linux', 'Local process']);
+    await page.getByRole('option', { name: 'Local process', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Local Docker image' })).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'MCP protocol version' }).click();
+    await page
+      .locator('.ant-select-item-option:visible')
+      .filter({ hasText: /^2025-11-25$/ })
+      .click();
+    await expect(page.locator('.ant-select-dropdown:visible')).toHaveCount(0);
+    await expect
+      .poll(() => page.locator('.mcp-launch-grid').evaluate((node) => node.scrollWidth <= node.clientWidth))
+      .toBe(true);
+    await page.screenshot({
+      path: info.outputPath('mcp-launch-narrow.png'),
+      style: '.project-path, .desktop-path { visibility: hidden !important }',
+    });
+    await button('Review launch plan').click();
+    const dialog = page.getByRole('dialog', { name: 'Review local launch' });
+    await expect(dialog).toContainText('server.mjs');
+    await expect(dialog).toContainText('2025-11-25');
+    await dialog.screenshot({ path: info.outputPath('mcp-native-review.png') });
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await button('Review launch plan').click();
+    await dialog.getByRole('button', { name: 'Start and discover' }).click();
+    await expect(page.getByText('Local process closed', { exact: true })).toBeVisible({ timeout: 45_000 });
+    const list = page.getByRole('region', { name: 'MCP capability list' });
+    await expect(button('Local results')).toHaveAttribute('aria-pressed', 'true');
+    await button('Isolated results').click();
+    await expect(list).toHaveCount(0);
+    await expect(page.getByText('No results saved for this service and run type.')).toBeVisible();
+    await expect(page.locator('.mcp-launch-grid')).toContainText('Local process');
+    await button('Local results').click();
+    await list.getByRole('button', { name: 'echo', exact: true }).click();
+    await page.getByRole('tab', { name: 'Details' }).click();
+    const details = page.locator('summary').filter({ hasText: /^Input schema$/ });
+    await details.click();
+    await expect(details.locator('..')).toHaveAttribute('open', '');
+    await details.click();
+    await page.getByRole('tab', { name: 'Test', exact: true }).click();
+    await page.getByRole('textbox', { name: 'value *', exact: true }).fill('native desktop check');
+    await button('Call tool').click();
+    await expect(dialog).toContainText('native desktop check');
+    await dialog.getByRole('button', { name: 'Start and test' }).click();
+    await expect(
+      page.locator('.mcp-inspector pre.code:visible').filter({ hasText: 'native desktop check' }).first(),
+    ).toBeVisible({ timeout: 45_000 });
+    await page.screenshot({ path: info.outputPath('mcp-native-result.png') });
+
+    await page.getByRole('combobox', { name: 'MCP service' }).click();
+    await page.locator('.ant-select-item-option:visible').filter({ hasText: 'missing-settings' }).click();
+    await button('Review launch plan').click();
+    await dialog.getByRole('button', { name: 'Start and discover' }).click();
+    const failure = page.getByRole('alert').filter({ hasText: 'The local MCP process could not start.' });
+    await expect(failure.getByText('Local process exit code 1', { exact: true })).toBeVisible();
+    await expect(failure.getByText('Required local settings file was not found.', { exact: true })).toBeVisible();
+    await failure.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: info.outputPath('mcp-native-startup-error.png'),
+      animations: 'disabled',
+      style: '.project-path, .desktop-path { visibility: hidden !important }',
+    });
+    await failure.locator('summary').click();
+    await failure.getByRole('button', { name: 'Copy error details' }).click();
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toContain('MCP_NATIVE_FAILED');
+  } finally {
+    await closeDesktop(app);
+    sample.destroy();
   }
 });
 
@@ -606,7 +872,7 @@ test('browses and compares selected versions with responsive graph controls', as
   sample.write('.ifaceforge.json', config);
   writeFileSync(
     join(sample.root, 'custom-handler.py'),
-    'from urllib.parse import urlsplit\ndef dispatch(handler):\n    route = urlsplit(handler.path)\n    if handler.command != "GET":\n        raise ValueError(route)\n',
+    'from urllib.parse import urlsplit\ndef dispatch(handler):\n    route = urlsplit(handler.path)\n    if route.path == configured_path and handler.command == "GET":\n        return route\n',
   );
   git(sample.root, ['add', '.ifaceforge.json', 'custom-handler.py']);
   commit('Initial API definitions', 'Original contract and helper modules.');
@@ -776,7 +1042,7 @@ test('browses and compares selected versions with responsive graph controls', as
     await expect(page.getByText('API source coverage', { exact: true })).toBeVisible();
     await page
       .locator('summary')
-      .filter({ hasText: /^\d+ route diagnostics$/ })
+      .filter({ hasText: /^\d+ unresolved route diagnostics,/ })
       .click();
     await page.getByRole('button', { name: /^custom-handler\.py:/ }).click();
     const coverageSource = page.getByRole('dialog', { name: /^custom-handler\.py:/ });

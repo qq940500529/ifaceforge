@@ -2,11 +2,17 @@ import { expect, test } from '@playwright/test';
 import { createServer } from 'node:http';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { address, browserWorkbench, close, fixture, ifg, repositoryRoot } from '../support/fixture.js';
+import {
+  address,
+  browserWorkbench,
+  close,
+  commitFixture,
+  fixture,
+  ifg,
+  repositoryRoot,
+} from '../support/fixture.js';
 // @ts-expect-error JavaScript fixture is also runnable directly from Node.
 import { taskApp } from '../../fixtures/express/app.mjs';
-// @ts-expect-error JavaScript fixture is also runnable directly from Node.
-import { mcpHttp } from '../../fixtures/express/mcp.mjs';
 
 for (const language of ['en', 'zh-CN'] as const) {
   test.describe(language, () => {
@@ -88,6 +94,9 @@ for (const language of ['en', 'zh-CN'] as const) {
         await page.getByRole('menuitem', { name: 'Wiki', exact: true }).click();
         await page.getByRole('button', { name: label('Generate Wiki', '生成 Wiki') }).click();
         await expect(page.getByRole('heading', { name: label('IfaceForge Wiki', '接口工坊 Wiki') })).toBeVisible();
+        const reader = page.locator('.wiki-detail');
+        await reader.getByRole('link', { name: new RegExp('^' + label('Skills', '技能') + ' · \\d+$') }).click();
+        await expect(reader.getByRole('heading', { name: label('Skills', '技能'), exact: true })).toBeFocused();
         const catalog = JSON.parse(readFileSync(join(host.data, 'wiki', 'catalog.json'), 'utf8'));
         expect(catalog.locale).toBe(language);
         await page.getByRole('button', { name: zh ? 'English' : '简体中文', exact: true }).click();
@@ -117,42 +126,31 @@ for (const language of ['en', 'zh-CN'] as const) {
   });
 }
 
-test('discovers an MCP tool and submits a schema field through the Web interface', async ({ page }) => {
-  const { root, write, destroy } = fixture();
-  const service = mcpHttp();
-  const target = await address(service);
+test('discovers an isolated MCP tool and submits a schema field through the Web interface', async ({ page }) => {
+  test.skip(!process.env.IFG_TEST_DOCKER, 'Requires the local Docker test image');
+  test.setTimeout(120_000);
+  const { root, destroy } = fixture('mcp-isolation');
+  commitFixture(root);
+  expect((await ifg(root, 'scan')).exit).toBe(0);
   const host = await browserWorkbench(root, page);
   try {
-    const profile = await ifg(
-      root,
-      'profile',
-      'put',
-      '--file',
-      write('mcp-profile.json', {
-        schemaVersion: 1,
-        id: 'demo',
-        name: 'MCP demo',
-        mcp: { transport: 'streamableHttp', url: target + '/mcp' },
-      }),
-    );
-    expect(profile.exit).toBe(0);
     await page.goto(host.url);
     await page.getByRole('menuitem', { name: 'MCP', exact: true }).click();
-    await page.getByRole('combobox', { name: 'Profile', exact: true }).click();
-    await page.getByRole('option', { name: 'MCP demo', exact: true }).click();
-    await page.getByRole('button', { name: 'Connect', exact: true }).click();
-    await page.getByRole('button', { name: 'Discover', exact: true }).click();
+    await page.getByRole('combobox', { name: 'MCP service' }).click();
+    await page.locator('.ant-select-item-option:visible').filter({ hasText: 'sample-stdio' }).click();
+    if (process.env.IFG_TEST_DOCKER_IMAGE)
+      await page.getByRole('textbox', { name: 'Local Docker image' }).fill(process.env.IFG_TEST_DOCKER_IMAGE);
+    await page.getByRole('button', { name: 'Review launch plan' }).click();
+    await page.getByRole('button', { name: 'Start and discover' }).click({ timeout: 30_000 });
+    await expect(page.getByText('Sandbox removed', { exact: true })).toBeVisible({ timeout: 60_000 });
     await page.getByRole('button', { name: 'echo', exact: true }).click();
     await page.getByRole('textbox', { name: 'value *', exact: true }).fill('from basic field');
     await page.getByRole('button', { name: 'Call tool', exact: true }).click();
-    await expect(
-      page.locator('pre.code').filter({ hasText: '"value": "from basic field"' }).first(),
-    ).toBeVisible();
-    await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+    await expect(page.locator('pre.code').filter({ hasText: '"value": "from basic field"' }).first()).toBeVisible({
+      timeout: 60_000,
+    });
   } finally {
     await host.stop();
-    await close(service);
     destroy();
   }
 });

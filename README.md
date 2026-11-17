@@ -11,7 +11,7 @@
   <p><a href="https://qq940500529.github.io/ifaceforge/">文档站</a> · <a href="docs/README.en.md">English</a> · <a href="docs/mcp.md">MCP 指南</a> · <a href="docs/cli.md">CLI</a> · <a href="CHANGELOG.md">更新日志</a></p>
 </div>
 
-<a href="docs/mcp.md"><img src="docs/assets/mcp-workbench.png" alt="IfaceForge MCP 工作台，左侧为服务目录，右侧为参数、断言和测试结果"></a>
+<a href="docs/mcp.md"><img src="docs/assets/mcp-workbench.png" alt="IfaceForge 隔离发现结果、能力目录与工具测试表单"></a>
 
 ## 开始使用
 
@@ -21,7 +21,11 @@
 
 1. 从 [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases) 下载对应安装包，并确保 Git 可从 `PATH` 找到。
 2. 打开 IfaceForge，点击 **添加项目**，选择本机 Git 工作树或其中的文件夹。
-3. 点击 **扫描项目** 查看目录。进入 **MCP**，选择环境并连接，目录会加载该服务提供的能力。
+3. 点击 **扫描项目** 查看目录。进入 **MCP**，选中仓库服务可发起隔离发现。使用已有能力声明时可直接离线查看。
+
+Windows 安装向导默认创建开始菜单快捷方式，桌面快捷方式可选。自动化可用同一个 EXE 静默安装。[Windows 安装参数](docs/workbench.md#windows-交互与静默安装)
+
+**平台验证范围**。Windows x64 已完成本机验收。macOS ARM64 和 Linux x64 提供构建，本次未做实机验收。欢迎试用并在 [GitHub Issues](https://github.com/qq940500529/ifaceforge/issues/new/choose) 提交系统版本、架构、安装包格式和复现步骤。
 
 > [!TIP]
 > 选中 MCP 条目即可打开测试。在同一处查看定义、填写参数、检查返回内容并保存用例。

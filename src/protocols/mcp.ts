@@ -4,6 +4,7 @@ import {
   StreamableHTTPClientTransport,
   isInputRequiredResult,
   type RequestOptions,
+  type Transport,
 } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Ajv } from 'ajv';
@@ -105,6 +106,16 @@ export function mcpError(error: unknown, sent: boolean, closed: boolean) {
 // The SDK probes in place for transport subclasses. One user connection starts one child.
 class WorkbenchStdio extends StdioClientTransport {}
 
+export function needsFreshLegacyProcess(error: unknown) {
+  if (!(error instanceof AppError) || error.code !== 'MCP_CONNECT_FAILED') return false;
+  const details = error.details as { cause?: string; details?: { protocolCode?: string; reason?: string } };
+  return (
+    details.cause === 'MCP_DISCONNECTED' &&
+    details.details?.protocolCode === 'ERA_NEGOTIATION_FAILED' &&
+    /closed during (?:the )?(?:server\/discover|version negotiation) probe/i.test(details.details.reason ?? '')
+  );
+}
+
 export class McpSession {
   private closed = false;
   private readonly inputSchemas = new Map<string, object>();
@@ -116,7 +127,21 @@ export class McpSession {
     };
   }
 
-  static async connect(profile: Profile, root: string, bindings: Bindings, signal?: AbortSignal) {
+  static async connect(
+    profile: Profile,
+    root: string,
+    bindings: Bindings,
+    signal?: AbortSignal,
+    boundary?: {
+      stdio?: { command: string; args: string[] };
+      transport?: Transport;
+      legacy?: boolean;
+      connectTimeout?: number;
+      probeTimeout?: number;
+      fetch?: typeof fetch;
+      onStderr?: (chunk: Buffer) => void;
+    },
+  ) {
     const config = profile.mcp;
     if (!config) invalid('Selected profile does not contain an MCP connection');
     const pin = config.protocolVersion;
@@ -127,37 +152,47 @@ export class McpSession {
       {
         supportedProtocolVersions: pin ? [pin] : undefined,
         versionNegotiation: {
-          mode: pin === '2026-07-28' ? { pin } : pin || config.transport === 'sse' ? 'legacy' : 'auto',
-          probe: { timeoutMs: 2500 },
+          mode:
+            pin === '2026-07-28'
+              ? { pin }
+              : boundary?.legacy || pin || config.transport === 'sse'
+                ? 'legacy'
+                : 'auto',
+          probe: { timeoutMs: boundary?.probeTimeout ?? 6000 },
         },
       },
     );
     const session = new McpSession(client);
     const transport =
-      config.transport === 'stdio'
+      boundary?.transport ??
+      (config.transport === 'stdio'
         ? new WorkbenchStdio({
-            command: config.command,
-            args: config.args?.map((arg) => String(bindings.resolve(arg))),
-            cwd: projectFile(root, config.cwd ?? '.'),
-            env: Object.fromEntries(
-              Object.entries(config.env ?? {}).map(([key, ref]) => [key, bindings.environment(ref.env)]),
-            ),
-            stderr: 'ignore',
+            ...(boundary?.stdio ?? {
+              command: config.command,
+              args: config.args?.map((arg) => String(bindings.resolve(arg))),
+              cwd: projectFile(root, config.cwd ?? '.'),
+              env: Object.fromEntries(
+                Object.entries(config.env ?? {}).map(([key, ref]) => [key, bindings.environment(ref.env)]),
+              ),
+            }),
+            stderr: boundary?.onStderr ? 'pipe' : 'ignore',
             maxBufferSize: 2 * 1024 * 1024,
           })
         : new (config.transport === 'sse' ? SSEClientTransport : StreamableHTTPClientTransport)(
             httpUrl(String(bindings.resolve(config.url))),
             {
               requestInit: { headers: new Headers(headerPairs(config.headers, bindings)), redirect: 'error' },
+              fetch: boundary?.fetch,
             },
-          );
+          ));
+    if (transport instanceof WorkbenchStdio && boundary?.onStderr) transport.stderr?.on('data', boundary.onStderr);
     const abort = () => {
       void session.close().catch(() => undefined);
     };
     if (signal?.aborted) throw signal.reason;
     signal?.addEventListener('abort', abort, { once: true });
     try {
-      await client.connect(transport, { timeout: 15_000, signal });
+      await client.connect(transport, { timeout: boundary?.connectTimeout ?? 15_000, signal });
       return session;
     } catch (error) {
       await session.close().catch(() => undefined);
@@ -210,13 +245,14 @@ export class McpSession {
     action: Exclude<McpAction, { type: 'template' }>,
     signal?: AbortSignal,
     onProgress?: RequestOptions['onprogress'],
+    onGroup?: (group: Pick<DiscoveryGroup, 'type' | 'state'> & { count: number }) => void,
   ): Promise<unknown> {
     if (signal?.aborted) throw signal.reason;
     if (this.closed) throw new AppError('MCP_DISCONNECTED', 'MCP connection ended');
     const options: RequestOptions = { signal, timeout: 30_000, onprogress: onProgress };
     let sent = false;
     try {
-      if (action.type === 'discover') return await this.inventory(options);
+      if (action.type === 'discover') return await this.inventory(options, onGroup);
       if (action.type === 'read') {
         const result = await this.client.readResource({ uri: action.uri }, options);
         if (isInputRequiredResult(result)) {
@@ -254,27 +290,48 @@ export class McpSession {
     }
   }
 
-  private async inventory(options: RequestOptions) {
+  private async inventory(
+    options: RequestOptions,
+    onGroup?: (group: Pick<DiscoveryGroup, 'type' | 'state'> & { count: number }) => void,
+  ) {
     const groups: DiscoveryGroup[] = [];
+    const advertised = this.client.getServerCapabilities();
+    const capabilities = {
+      tool: 'tools',
+      resource: 'resources',
+      template: 'resources',
+      prompt: 'prompts',
+    } as const;
     async function discover(
       type: DiscoveryGroup['type'],
       load: (cursor?: string) => Promise<{ items: object[]; nextCursor?: string }>,
     ) {
+      if (!advertised?.[capabilities[type]]) {
+        groups.push({ type, state: 'notPublished', items: [] });
+        onGroup?.({ type, state: 'notPublished', count: 0 });
+        return;
+      }
+      const partial: Record<string, unknown>[] = [];
       try {
-        const items = (await paginate(load)) as Record<string, unknown>[];
+        const items = (await paginate(async (cursor) => {
+          const page = await load(cursor);
+          if (partial.length + page.items.length > 20_000)
+            throw new AppError('MCP_INVENTORY_LIMIT', 'The MCP list exceeds 20,000 entries');
+          partial.push(...(page.items as Record<string, unknown>[]));
+          return page;
+        })) as Record<string, unknown>[];
         groups.push({ type, state: items.length ? 'found' : 'empty', items });
       } catch (error) {
         if (options.signal?.aborted) throw options.signal.reason;
         const normalized = mcpError(error, false, false);
         const state =
-          normalized.code === 'MCP_NOT_PUBLISHED'
+          normalized.code === 'MCP_NOT_PUBLISHED' && !partial.length
             ? 'notPublished'
             : normalized.code === 'MCP_PERMISSION'
               ? 'permissionDenied'
               : normalized.code === 'MCP_DISCONNECTED' || normalized.code === 'MCP_TIMEOUT'
                 ? 'unreachable'
                 : 'fault';
-        const partial = (normalized.details as { items?: Record<string, unknown>[] } | null)?.items ?? [];
         groups.push({
           type,
           state,
@@ -282,6 +339,8 @@ export class McpSession {
           error: { code: normalized.code, details: normalized.details },
         });
       }
+      const { state, items } = groups.at(-1)!;
+      onGroup?.({ type, state, count: items.length });
     }
     // Pass an explicit cursor property so the SDK does not aggregate pages itself.
     await discover('tool', async (cursor) => {

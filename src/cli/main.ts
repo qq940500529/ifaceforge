@@ -17,6 +17,8 @@ import { textGraph } from '../app/git-graph.js';
 import type { gitLog } from '../app/git-history.js';
 import type { VersionReport } from '../app/version-compare.js';
 import { referencedEnvironment } from '../protocols/variables.js';
+import { catalog } from '../app/catalog.js';
+import { mapping } from '../scanner/openapi.js';
 import { globalWorkspace, projectWorkspace, type CliInput } from './workspace.js';
 import type { Run } from '../app/runs.js';
 
@@ -151,7 +153,10 @@ async function main() {
       if (globalOptions.includes(key)) continue;
       if (!desc.options.includes(key)) invalid('Unsupported option for ' + name, { key });
       const value = values[key];
-      const field = key.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+      const field =
+        name.startsWith('mcp ') && key === 'mode'
+          ? 'mcpMode'
+          : key.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
       if (['limit', 'offset', 'version'].includes(key)) {
         if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
           invalid('Expected numeric option', { key });
@@ -262,10 +267,30 @@ async function main() {
     const paths = registry.paths(id);
     repository = new Repository(openProjectDatabase(paths));
     if (cliInput.async && cliInput.out) invalid('Wait for the task before writing its output');
+    const repositoryMcp =
+      name.startsWith('mcp ') && typeof input.service === 'string'
+        ? catalog(repository).find((entry) => entry.id === input.service)
+        : undefined;
+    const serverConfig = mapping(
+      repositoryMcp?.observations.find((entry) => entry.definition.type === 'server')?.definition.template,
+    );
+    const mcpEnvironment = [serverConfig, ...Object.values(mapping(serverConfig.launch)).map(mapping)].flatMap(
+      (config) => [
+        ...(Array.isArray(config.env_vars) ? config.env_vars : []),
+        ...Object.values(mapping(config.env)).flatMap((value) => {
+          if (typeof value !== 'string') return [];
+          const ref = /^\$\{(?:env:)?([a-z_][a-z0-9_]*)\}$/i.exec(value);
+          return ref ? [ref[1]] : [];
+        }),
+      ],
+    );
     const env = /^(?:api (?:preview|send|curl)|mcp |test run)/.test(name)
       ? referencedEnvironment([
           input,
           repository.list('profiles'),
+          ...mcpEnvironment
+            .filter((name) => typeof name === 'string' && /^[a-z_][a-z0-9_]*$/i.test(name))
+            .map((name) => ({ env: name })),
           ...(name === 'test run' ? [repository.list('cases')] : []),
         ])
       : undefined;

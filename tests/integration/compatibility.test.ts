@@ -4,6 +4,8 @@ import { expect, it } from 'vitest';
 import { parseOpenApi } from '../../src/scanner/openapi.js';
 import { scanMcpSource } from '../../src/scanner/mcp-discovery.js';
 import type { Diagnostic } from '../../src/scanner/model.js';
+import { McpSession, resolveMcpTarget, type Discovery } from '../../src/protocols/mcp.js';
+import { Bindings, type Profile } from '../../src/protocols/variables.js';
 import { address, close, fixture, ifg, repositoryRoot } from '../support/fixture.js';
 
 it('reads all supported Swagger and OpenAPI families and preserves unknown definitions', () => {
@@ -70,6 +72,10 @@ it('reads all supported Swagger and OpenAPI families and preserves unknown defin
 it('inspects literal MCP registrations in TypeScript without importing source', () => {
   const diagnostics: Diagnostic[] = [];
   const source = [
+    'import { McpServer as LocalServer } from "@modelcontextprotocol/server";',
+    'const server = new LocalServer({name: "sample", version: "1"});',
+    'window.prompt(message, value);',
+    'function unrelated(server) { server.registerPrompt(dynamicName, {}); }',
     'const input = z.object({id:z.string(), limit:z.number().int().optional()});',
     'const tool = "find";',
     'server.registerTool(\n tool, {description: "Find a record", inputSchema: input}, handler);',
@@ -89,7 +95,8 @@ it('inspects literal MCP registrations in TypeScript without importing source', 
     { name: 'variable', definition: { type: 'template', uriTemplate: 'test://{id}' } },
     { name: 'explain', definition: { type: 'prompt', argsSchema: { required: ['name'] } } },
   ]);
-  expect(diagnostics.map((issue) => issue.code)).toContain('MCP_DYNAMIC_REGISTRATION');
+  expect(diagnostics.filter((issue) => issue.code === 'MCP_DYNAMIC_REGISTRATION')).toHaveLength(1);
+  expect(scanMcpSource('browser.js', 'window.prompt(message, value);', 'test', [])).toEqual([]);
 });
 
 type Rpc = { id?: number | string; method?: string; params?: Record<string, unknown> };
@@ -137,6 +144,7 @@ for (const [protocolVersion, transport] of [
     async () => {
       const project = fixture();
       let stream: ServerResponse | undefined;
+      let session: McpSession | undefined;
       const server = createServer(
         (req, res) =>
           void (async () => {
@@ -159,34 +167,32 @@ for (const [protocolVersion, transport] of [
       );
       try {
         const url = (await address(server)) + (transport === 'sse' ? '/sse' : '/mcp');
-        const profile = project.write('profile.json', {
+        const profile: Profile = {
           schemaVersion: 1,
           id: 'revision',
           name: 'Revision',
           mcp: { transport, url, protocolVersion },
+        };
+        session = await McpSession.connect(profile, project.root, new Bindings(profile));
+        const inventory = (await session.execute({ type: 'discover' })) as Discovery;
+        expect(inventory.protocolVersion).toBe(protocolVersion);
+        expect(inventory.groups.map((group) => group.state)).toEqual(['found', 'found', 'found', 'found']);
+        expect(await session.execute({ type: 'call', tool: 'sample', arguments: {} })).toMatchObject(
+          responses['tools/call'] as object,
+        );
+        expect(await session.execute({ type: 'read', uri: 'sample://1' })).toMatchObject({
+          contents: [{ uri: 'sample://1' }],
         });
-        expect((await ifg(project.root, 'profile', 'put', '--file', profile)).exit).toBe(0);
-        const file = project.write('sequence.json', {
-          schemaVersion: 1,
-          steps: [
-            { id: 'discover', type: 'discover' },
-            { id: 'tool', type: 'call', tool: 'sample', arguments: {} },
-            { id: 'read', type: 'read', uri: 'sample://1' },
-            { id: 'template', type: 'template', uriTemplate: 'sample://{id}', arguments: { id: '2' } },
-            { id: 'prompt', type: 'prompt', name: 'sample', arguments: {} },
-          ],
-        });
-        const run = await ifg(project.root, 'mcp', 'batch', '--profile', 'revision', '--file', file);
-        expect(run.result.error).toBeNull();
-        expect(run.result.data.steps[0].result.protocolVersion).toBe(protocolVersion);
-        expect(run.result.data.steps[0].result.groups.map((group: { state: string }) => group.state)).toEqual([
-          'found',
-          'found',
-          'found',
-          'found',
-        ]);
-        expect(run.result.data.steps[3].result.contents[0].uri).toBe('sample://2');
+        expect(
+          await session.execute(
+            resolveMcpTarget({ type: 'template', uriTemplate: 'sample://{id}', arguments: { id: '2' } }),
+          ),
+        ).toMatchObject({ contents: [{ uri: 'sample://2' }] });
+        expect(await session.execute({ type: 'prompt', name: 'sample', arguments: {} })).toMatchObject(
+          responses['prompts/get'] as object,
+        );
       } finally {
+        await session?.close();
         stream?.end();
         await close(server);
         project.destroy();
@@ -200,7 +206,7 @@ it('serves the same developer guide as Markdown and a read-only MCP resource', a
   try {
     const guide = await ifg(project.root, 'guide', 'show', '--lang', 'en');
     expect(guide.result.data.markdown).toContain('## Skills');
-    const profile = project.write('guides-profile.json', {
+    const profile: Profile = {
       schemaVersion: 1,
       id: 'guides',
       name: 'Guides',
@@ -210,18 +216,14 @@ it('serves the same developer guide as Markdown and a read-only MCP resource', a
         args: [join(repositoryRoot, 'dist', 'cli', 'main.js'), 'guide', 'serve'],
         protocolVersion: '2026-07-28',
       },
-    });
-    expect((await ifg(project.root, 'profile', 'put', '--file', profile)).exit).toBe(0);
-    const resource = await ifg(
-      project.root,
-      'mcp',
-      'read',
-      'ifaceforge://guides/developer-en',
-      '--profile',
-      'guides',
-    );
-    expect(resource.result.error).toBeNull();
-    expect(resource.result.data.steps[0].result.contents[0].text).toBe(guide.result.data.markdown);
+    };
+    const session = await McpSession.connect(profile, project.root, new Bindings(profile));
+    try {
+      const resource = await session.execute({ type: 'read', uri: 'ifaceforge://guides/developer-en' });
+      expect(resource).toMatchObject({ contents: [{ text: guide.result.data.markdown }] });
+    } finally {
+      await session.close();
+    }
   } finally {
     project.destroy();
   }

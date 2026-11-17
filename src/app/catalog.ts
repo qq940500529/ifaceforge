@@ -13,13 +13,24 @@ import {
   type ScanSource,
 } from './files.js';
 import { AppError, invalid } from './errors.js';
+import { describeDiagnostic } from './guides.js';
 import type { Repository } from '../storage/repository.js';
-import { parseMcpConfig, parseSkill, scanSource } from '../scanner/adapters.js';
+import { mcpConfigDocument, mcpConfigName, parseMcpConfig, parseSkill, scanSource } from '../scanner/adapters.js';
 import { parseMcpManifest } from '../scanner/mcp-discovery.js';
+import { mcpLanguageFile } from '../scanner/mcp-languages.js';
+import { pythonConstants } from '../scanner/python-constants.js';
+import { pythonHttpCandidate } from '../scanner/python-http.js';
 import { mapping, parseOpenApi, yamlDocument } from '../scanner/openapi.js';
-import type { Diagnostic, Entity, Kind, Observation, Snapshot } from '../scanner/model.js';
+import {
+  mcpId,
+  type Diagnostic,
+  type Entity,
+  type Kind,
+  type Observation,
+  type Snapshot,
+} from '../scanner/model.js';
 
-const adapters: Adapter[] = ['express', 'fastapi', 'mcp-typescript'];
+const adapters: Adapter[] = ['express', 'fastapi', 'mcp-source'];
 const ignored = new Set([
   '.git',
   'node_modules',
@@ -31,7 +42,7 @@ const ignored = new Set([
   'coverage',
 ]);
 const openApiName = /(?:^|\/)(?:openapi|swagger)(?:[._-][^/]*)?\.(?:ya?ml|json)$/i;
-export const scannerVersion = 3;
+export const scannerVersion = 6;
 const apiCoverageCodes = new Set(['DYNAMIC_ROUTE', 'HTTP_HANDLER_UNRESOLVED', 'EXPRESS_SOURCE_PARSE']);
 
 function hasApiVersion(path: string, text: string) {
@@ -49,9 +60,20 @@ export interface RuntimeObservation {
   profile: string;
   service: string;
   kind: 'api' | 'mcp';
+  commit?: string;
+  sourceKind?: 'git' | 'worktree';
   complete: boolean;
   observations: Observation[];
   diagnostics: Diagnostic[];
+}
+
+function runtimeObservations(repository: Repository, commit?: string | null) {
+  return repository
+    .list<RuntimeObservation>('observations')
+    .filter(
+      (target) =>
+        target.kind === 'api' || (Boolean(commit) && target.commit === commit && target.sourceKind !== 'worktree'),
+    );
 }
 
 interface ScanFile {
@@ -71,7 +93,7 @@ function configured(path: string, entry: SourceConfig) {
   );
 }
 
-function scanPath(
+async function scanPath(
   project: ProjectPaths,
   path: string,
   text: string,
@@ -79,14 +101,15 @@ function scanPath(
   diagnostics: Diagnostic[],
   checkpoint?: () => void,
   historical?: ScanSource,
+  constants?: ReturnType<typeof pythonConstants>,
 ) {
   if (/(^|\/)SKILL\.md$/.test(path)) return [parseSkill(project.root, path, text, diagnostics, historical)];
   if (/(^|\/)\.?mcp-capabilities\.json$/i.test(path))
     return parseMcpManifest(path, parseJson(text, path), source.id, diagnostics);
-  if (source.mcpConfigs?.includes(path) || /(^|\/)\.mcp\.json$/.test(path)) {
+  if (source.mcpConfigs?.includes(path) || mcpConfigName.test(path)) {
     return parseMcpConfig(
       path,
-      parseJson(text, path),
+      mcpConfigDocument(path, text),
       diagnostics,
       source.id === 'default' ? undefined : source.id,
     );
@@ -98,7 +121,16 @@ function scanPath(
       diagnostics,
     );
   }
-  return scanSource(path, text, source.adapters ?? adapters, source.id, diagnostics, checkpoint);
+  return scanSource(
+    path,
+    text,
+    source.adapters ?? adapters,
+    source.id,
+    diagnostics,
+    checkpoint,
+    source.mcpRules,
+    constants,
+  );
 }
 
 export function mergeObservations(
@@ -134,7 +166,10 @@ export function mergeObservations(
         );
         if (paths.size > 1 || definitions.size > 1) differences.push('DEFINITION_CONFLICT');
       }
-      if (first.kind !== 'skill' && first.definition.type !== 'server') {
+      if (
+        first.kind !== 'skill' &&
+        !['server', 'source-hint', 'manifest'].includes(String(first.definition.type))
+      ) {
         for (const target of runtime) {
           if (
             target.complete &&
@@ -166,12 +201,14 @@ export interface ScanProgress {
   processed: number;
   total?: number;
   warnings: number;
+  errors?: number;
 }
 
 export interface ScanOptions {
   full?: boolean;
   includeUntracked?: boolean;
   progress?: (status: ScanProgress) => void;
+  diagnostic?: (issue: Diagnostic) => void;
   cancelled?: () => boolean;
   tracked?: { paths: string; commit: string | null };
   scan?: ScanConfig;
@@ -183,7 +220,11 @@ export function trackedFiles(include: boolean) {
   return ['ls-files', '-z', '--cached', ...(include ? ['--others', '--exclude-standard'] : [])];
 }
 
-export function scanProject(project: ProjectPaths, repository: Repository, options: ScanOptions = {}): Snapshot {
+export async function scanProject(
+  project: ProjectPaths,
+  repository: Repository,
+  options: ScanOptions = {},
+): Promise<Snapshot> {
   const check = () => {
     if (options.cancelled?.()) throw new AppError('SCAN_CANCELLED', 'Scan cancelled');
   };
@@ -207,31 +248,56 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
     sources.flatMap((source) => [...(source.openapi ?? []), ...(source.mcpConfigs ?? [])]),
   );
   for (const path of selectedFiles) paths.add(path);
+  const ignoredPath = (path: string) =>
+    path.split('/').some((part) => ignored.has(part)) ||
+    protectedSource.test(path) ||
+    scan.exclude?.some((pattern) => minimatch(path, pattern, { dot: true }));
+  const read = (path: string) => (historical ? historical.read(path) : sourceText(project.root, path));
+  const constants = pythonConstants((path) => {
+    check();
+    if (!paths.has(path) || ignoredPath(path) || (historical && !historical.has(path))) return;
+    try {
+      return read(path);
+    } catch {
+      return;
+    }
+  });
   const diagnostics: Diagnostic[] = [];
   const observations: Observation[] = [];
   const cache: [string, ScanFile][] = [];
   const hashes: [string, string][] = [];
   let complete = true;
   let warnings = 0;
+  let errors = 0;
+  function recordDiagnostic(issue: Diagnostic) {
+    const details = describeDiagnostic(issue);
+    diagnostics.push(details);
+    if (details.severity === 'info') return;
+    if (details.severity === 'error') errors++;
+    else warnings++;
+    options.diagnostic?.(details);
+  }
   const files = [...paths].sort();
   let processed = 0;
   let reportedAt = 0;
   for (const path of files) {
     check();
     if (processed === 0 || Date.now() - reportedAt >= 100) {
-      options.progress?.({ stage: 'processing', processed, total: files.length, warnings });
+      options.progress?.({ stage: 'processing', processed, total: files.length, warnings, errors });
       reportedAt = Date.now();
     }
     processed++;
     const scopeSources = sources.filter((entry) => configured(path, entry));
+    if (!scopeSources.length || ignoredPath(path)) continue;
     if (
-      !scopeSources.length ||
-      path.split('/').some((part) => ignored.has(part)) ||
-      protectedSource.test(path) ||
-      scan.exclude?.some((pattern) => minimatch(path, pattern, { dot: true }))
+      !/\.(?:[cm]?[jt]sx?|py|jsonc?|ya?ml|md|toml)$/i.test(path) &&
+      !mcpLanguageFile(path) &&
+      !scopeSources.some((source) =>
+        source.mcpRules?.some((rule) => path.toLowerCase().endsWith('.' + rule.extension)),
+      ) &&
+      !selectedFiles.has(path)
     )
       continue;
-    if (!/\.(?:[cm]?[jt]sx?|py|json|ya?ml|md)$/i.test(path) && !selectedFiles.has(path)) continue;
     try {
       if (
         historical
@@ -239,34 +305,45 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
           : !existsSync(projectFile(project.root, path, false)) && !selectedFiles.has(path)
       )
         continue;
-      const text = historical ? historical.read(path) : sourceText(project.root, path);
+      const text = read(path);
       const hash = digest(text);
       hashes.push([path, hash]);
       const key = digest(scope + '\0' + (historical ? 'git:' : 'worktree:') + path);
       const old = options.full ? undefined : repository.get<ScanFile>('scan_files', key);
-      // OpenAPI can refer to a file whose digest differs from the entry point.
-      const mayReference = /\$ref|swaggerVersion/.test(text) || /(^|\/)SKILL\.md$/.test(path);
+      // Imported constants can change independently of the HTTP handler.
+      const mayReference =
+        /\$ref|swaggerVersion/.test(text) ||
+        /(^|\/)SKILL\.md$/.test(path) ||
+        (/\.py$/i.test(path) &&
+          pythonHttpCandidate(path, text) &&
+          scopeSources.some((source) => (source.adapters ?? adapters).includes('fastapi')));
       const file: ScanFile =
         old?.digest === hash && !mayReference ? old : { digest: hash, diagnostics: [], observations: [] };
       if (old !== file) {
         for (const source of scopeSources) {
-          for (const item of scanPath(project, path, text, source, file.diagnostics, check, historical)) {
+          for (const item of await scanPath(
+            project,
+            path,
+            text,
+            source,
+            file.diagnostics,
+            check,
+            historical,
+            constants,
+          )) {
             file.observations.push(item);
           }
         }
         cache.push([key, file]);
       }
-      for (const item of file.diagnostics) {
-        diagnostics.push(item);
-        if (item.severity !== 'info') warnings++;
-      }
+      for (const item of file.diagnostics) recordDiagnostic(item);
       for (const item of file.observations) observations.push(item);
     } catch (error) {
       check();
       complete = false;
-      warnings++;
-      diagnostics.push({
+      recordDiagnostic({
         path,
+        severity: 'error',
         code: 'FILE_SCAN_FAILED',
         message: error instanceof Error ? error.message : String(error),
       });
@@ -280,6 +357,45 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
       // A freshly initialized Git project has no commit.
     }
   }
+  const mcpServices = new Set(
+    observations
+      .filter((entry) => entry.kind === 'mcp' && entry.definition.type === 'server')
+      .map((entry) => entry.service),
+  );
+  if (mcpServices.size === 1) {
+    const service = [...mcpServices][0];
+    for (let index = 0; index < observations.length; index++) {
+      const entry = observations[index];
+      if (entry.kind !== 'mcp' || entry.origin !== 'source' || entry.service !== 'default') continue;
+      const key = String(entry.definition.uri ?? entry.definition.uriTemplate ?? entry.name);
+      observations[index] = { ...entry, service, id: mcpId(service, String(entry.definition.type), key) };
+    }
+  }
+  const declarations = new Map<string, string | null>();
+  for (const item of observations) {
+    if (item.kind !== 'api' || item.origin !== 'declaration' || typeof item.definition.path !== 'string') continue;
+    const path = item.definition.path;
+    declarations.set(item.id, declarations.has(item.id) && declarations.get(item.id) !== path ? null : path);
+  }
+  const declared = new Set(declarations.keys());
+  for (const [index, item] of observations.entries()) {
+    const contractPath = declarations.get(item.id);
+    if (item.definition.adapter === 'python-http' && item.definition.pathPattern && contractPath) {
+      observations[index] = {
+        ...item,
+        name: String(item.definition.method).toUpperCase() + ' ' + contractPath,
+        definition: { ...item.definition, path: contractPath },
+      };
+    }
+    if (item.definition.adapter !== 'python-http' || declared.has(item.id)) continue;
+    declared.add(item.id);
+    recordDiagnostic({
+      code: 'HTTP_ROUTE_UNDOCUMENTED',
+      path: item.path,
+      line: item.line,
+      message: item.name + ' has source evidence and no OpenAPI declaration in this service',
+    });
+  }
   const snapshot: Snapshot = {
     id: options.snapshotId ?? randomUUID(),
     source: historical ? 'git' : 'worktree',
@@ -292,10 +408,10 @@ export function scanProject(project: ProjectPaths, repository: Repository, optio
     worktree: digest(stableJson(hashes)),
     entities: [],
   };
-  options.progress?.({ stage: 'saving', processed, total: files.length, warnings });
+  options.progress?.({ stage: 'saving', processed, total: files.length, warnings, errors });
   check();
   repository.transaction(() => {
-    const runtime = historical ? [] : repository.list<RuntimeObservation>('observations');
+    const runtime = historical ? [] : runtimeObservations(repository, snapshot.commit);
     snapshot.entities = mergeObservations(
       [...observations, ...runtime.flatMap((target) => target.observations)],
       runtime,
@@ -326,7 +442,7 @@ export function activeSnapshot(repository: Repository): Snapshot | undefined {
 export function catalog(repository: Repository, historical?: string) {
   if (historical) return getSnapshot(repository, historical).entities;
   const snapshot = activeSnapshot(repository);
-  const runtime = repository.list<RuntimeObservation>('observations');
+  const runtime = runtimeObservations(repository, snapshot?.commit);
   return mergeObservations(
     [
       ...(snapshot?.entities.flatMap((item) => item.observations.filter((entry) => entry.origin !== 'runtime')) ??
@@ -412,6 +528,7 @@ export function searchCatalog(
   );
   const snapshot = options.snapshot ? getSnapshot(repository, options.snapshot) : activeSnapshot(repository);
   const unresolved = snapshot?.diagnostics.filter((issue) => apiCoverageCodes.has(issue.code)) ?? [];
+  const undocumented = snapshot?.diagnostics.filter((issue) => issue.code === 'HTTP_ROUTE_UNDOCUMENTED') ?? [];
   return {
     ...page(items, options.limit, options.offset),
     ...(options.kind === 'api' || !options.kind
@@ -419,7 +536,11 @@ export function searchCatalog(
           coverage: {
             method: 'contracts-and-recognized-server-routes',
             unresolved: unresolved.length,
-            examples: unresolved.slice(0, 8),
+            undocumented: undocumented.length,
+            examples: [
+              ...unresolved.slice(0, undocumented.length ? 4 : 8),
+              ...undocumented.slice(0, 8 - Math.min(4, unresolved.length)),
+            ],
           },
         }
       : {}),

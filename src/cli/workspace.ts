@@ -181,16 +181,13 @@ export async function projectWorkspace(
   environment?: Record<string, string | null>,
 ) {
   const method = name === 'git select' ? 'git preference' : name === 'scan start' ? 'scan' : name;
-  const needsService =
-    input.async === true ||
-    !!input.connection ||
-    ['scan start', 'mcp connect', 'mcp status', 'mcp disconnect', 'git select'].includes(name);
+  const needsService = input.async === true || ['scan start', 'git select'].includes(name);
   const payload = { ...input };
   if (payload.file && ['data restore', 'api import'].includes(name) && payload.file !== '-')
     payload.file = resolve(payload.file);
   if (payload.out && ['data backup', 'wiki build', 'wiki preview'].includes(name))
     payload.out = resolve(payload.out);
-  const executesRun = /^(?:api send|mcp (?:discover|call|read|template|prompt|batch)|test run)$/.test(name);
+  const executesRun = /^(?:api send|mcp (?:probe|call|read|template|prompt|batch)|test run)$/.test(name);
   const data = await workspace(
     { method: 'command', name: method, project, input: payload, wait: !input.async && !executesRun, environment },
     needsService,

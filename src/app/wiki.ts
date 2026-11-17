@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import type { ProjectPaths } from './project.js';
 import type { Repository } from '../storage/repository.js';
 import type { Locale } from './config.js';
-import type { Snapshot } from '../scanner/model.js';
+import type { Kind, Snapshot } from '../scanner/model.js';
 import { activeSnapshot, getSnapshot } from './catalog.js';
 import { AppError, invalid } from './errors.js';
 import { digest, parseJson, projectFile } from './files.js';
@@ -95,8 +95,20 @@ function manifest(out: string): Manifest {
 }
 
 function markdownTitle(text: string) {
-  return text.replace(/[\r\n]/g, ' ').replace(/[\\[\]<>*_#]/g, '\\$&');
+  return text.replace(/[\r\n]/g, ' ').replace(/[\\[\]<>*_#`~&|!]/g, '\\$&');
 }
+
+function codeBlock(language: string, text: string) {
+  const fence = '`'.repeat((text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length + 1), 3));
+  return fence + language + '\n' + text + '\n' + fence;
+}
+
+const wikiKinds = ['api', 'mcp', 'skill'] as const;
+const wikiLabels: Record<Kind, [string, string]> = {
+  api: ['HTTP API', 'HTTP API'],
+  mcp: ['MCP', 'MCP'],
+  skill: ['Skills', '技能'],
+};
 
 function snapshotFor(repository: Repository, id?: string) {
   if (!id && repository.list<Snapshot>('scans')[0]?.complete === false) {
@@ -124,9 +136,9 @@ export function previewWiki(project: ProjectPaths, repository: Repository, optio
     const note = getNote(project, entity.id).text;
     orphanNotes.delete(noteName(entity.id));
     const body = entity.observations[0].definition.body;
-    const code = String.fromCharCode(96).repeat(3);
     const raw = JSON.stringify(bindings.redact(entity.observations.map((entry) => entry.definition)), null, 2);
-    const details = entity.kind === 'skill' ? String(body ?? '') : code + 'json\n' + raw + '\n' + code;
+    const details = entity.kind === 'skill' ? String(body ?? '') : codeBlock('json', raw);
+    const sourceRows = sources.map((source) => '- ' + markdownTitle(source)).join('\n');
     const example =
       entity.kind === 'api'
         ? 'ifg api export '
@@ -136,11 +148,24 @@ export function previewWiki(project: ProjectPaths, repository: Repository, optio
     pages[path] =
       [
         '# ' + title,
+        '[← ' + (zh ? 'Wiki 总览' : 'Wiki overview') + '](../README.md)',
         entity.summary,
-        (zh ? '定义摘要' : 'Definition digest') + ' ' + entity.version,
-        (zh ? '来源' : 'Sources') + '\n' + sources.map((source) => '- ' + markdownTitle(source)).join('\n'),
-        details,
-        code + 'sh\n' + example + "'" + entity.id.replaceAll("'", "'\"'\"'") + "'\n" + code,
+        [
+          '| ' + (zh ? '类型' : 'Category') + ' | ' + (zh ? '定义摘要' : 'Definition digest') + ' |',
+          '| --- | --- |',
+          '| ' + wikiLabels[entity.kind][zh ? 1 : 0] + ' | `' + entity.version + '` |',
+        ].join('\n'),
+        sourceRows ? '## ' + (zh ? '来源' : 'Sources') + '\n\n' + sourceRows : '',
+        details
+          ? '## ' +
+            (entity.kind === 'skill' ? (zh ? '技能文档' : 'Skill documentation') : zh ? '定义' : 'Definition') +
+            '\n\n' +
+            details
+          : '',
+        '## ' +
+          (zh ? '命令行' : 'Command line') +
+          '\n\n' +
+          codeBlock('sh', example + "'" + entity.id.replaceAll("'", "'\"'\"'") + "'"),
         note ? '## ' + (zh ? '人工说明' : 'Notes') + '\n\n' + note : '',
       ]
         .filter(Boolean)
@@ -148,12 +173,44 @@ export function previewWiki(project: ProjectPaths, repository: Repository, optio
     return { id: entity.id, kind: entity.kind, name: entity.name, summary: entity.summary, sources, page: path };
   });
   const catalog = { schemaVersion: 1, snapshot: snapshot.id, locale, items };
+  const groups = wikiKinds
+    .map((kind) => ({
+      label: wikiLabels[kind][zh ? 1 : 0],
+      items: items.filter((item) => item.kind === kind),
+    }))
+    .filter((group) => group.items.length);
   pages['README.md'] =
-    '# ' +
-    (zh ? '接口工坊 Wiki' : 'IfaceForge Wiki') +
-    '\n\n' +
-    items.map((item) => '- [' + markdownTitle(item.name) + '](' + item.page + ')').join('\n') +
-    '\n';
+    [
+      '# ' + (zh ? '接口工坊 Wiki' : 'IfaceForge Wiki'),
+      (zh ? '扫描快照' : 'Scan snapshot') + ' `' + snapshot.id + '`',
+      groups
+        .map(
+          ({ label, items }) =>
+            '[' + label + ' · ' + items.length + '](#' + label.toLowerCase().replaceAll(' ', '-') + ')',
+        )
+        .join(' '),
+      ...groups.map((group) =>
+        [
+          '## ' + group.label,
+          '',
+          '| ' + (zh ? '名称' : 'Name') + ' | ' + (zh ? '说明' : 'Description') + ' |',
+          '| --- | --- |',
+          ...group.items.map(
+            (item) =>
+              '| [' +
+              markdownTitle(item.name) +
+              '](' +
+              item.page +
+              ') | ' +
+              (markdownTitle(item.summary.trim()) || '—') +
+              ' |',
+          ),
+        ].join('\n'),
+      ),
+      items.length ? '' : zh ? '此快照没有可记录的能力。' : 'This snapshot has no capabilities to document.',
+    ]
+      .filter(Boolean)
+      .join('\n\n') + '\n';
   pages['catalog.json'] = JSON.stringify(catalog, null, 2) + '\n';
   const files = Object.fromEntries(Object.entries(pages).map(([path, text]) => [path, digest(text)]));
   const old = existsSync(out) ? manifest(out) : { files: {} as Record<string, string> };
