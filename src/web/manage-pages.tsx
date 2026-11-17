@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Input, Modal, Select, Space, Tabs, Typography } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Run, Case, Suite, Versioned } from '../app/runs.js';
 import type { SandboxPlan } from '../protocols/mcp-sandbox.js';
 import type { Settings } from '../app/config.js';
@@ -367,14 +367,21 @@ export function WikiPage() {
       (!category || category === entry.kind) &&
       [entry.name, entry.summary].some((text) => text.normalize('NFKC').toLowerCase().includes(term)),
   );
-  function openPage(path: string) {
-    setPage(path);
-    pane.reveal();
-  }
-  function wikiLink(href: string) {
-    if (page === wikiHome && items.has(href)) return () => openPage(href);
-    if (page !== wikiHome && href === '../README.md') return () => openPage(wikiHome);
-  }
+  const { reveal } = pane;
+  const openPage = useCallback(
+    (path: string) => {
+      setPage(path);
+      reveal();
+    },
+    [reveal],
+  );
+  const wikiLink = useCallback(
+    (href: string) => {
+      if (page === wikiHome && items.has(href)) return () => openPage(href);
+      if (page !== wikiHome && href === '../README.md') return () => openPage(wikiHome);
+    },
+    [items, openPage, page],
+  );
   const note = item ? notes[item.id] : undefined;
   useEffect(() => {
     let active = true;

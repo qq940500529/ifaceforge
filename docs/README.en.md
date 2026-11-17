@@ -2,43 +2,55 @@
   <img src="https://raw.githubusercontent.com/qq940500529/ifaceforge/main/build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge</h1>
   <p><strong>An interface and skills workbench for AI application projects</strong></p>
-  <p><a href="https://github.com/qq940500529/ifaceforge/releases">Download</a> · <a href="https://qq940500529.github.io/ifaceforge/mcp.html">MCP guide</a> · <a href="https://qq940500529.github.io/ifaceforge/">简体中文</a> · <a href="https://qq940500529.github.io/ifaceforge/cli.html">CLI reference</a></p>
+  <p>Browse APIs, MCP, and Skills at the same Git revision. Review changes and save interface checks as repeatable tests.</p>
+  <p><a href="https://github.com/qq940500529/ifaceforge/releases/latest">Download</a> · <a href="https://qq940500529.github.io/ifaceforge/">Documentation</a> · <a href="https://github.com/qq940500529/ifaceforge#readme">简体中文</a></p>
 </div>
-
-## Which projects is IfaceForge for?
-
-When applications and AI agents use the same business capabilities, teams often maintain three entry points. **APIs** let applications call a service. **MCP** lets agents discover tools and resources and interact with them. **Skills** tell agents when to use those capabilities and how to complete a task. IfaceForge lets teams review all three at the same Git revision and rerun interface tests when they change.
-
-| Project type                                           | Why these capabilities need managing                                                                                                                                                                    |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **AI applications and agent products**                 | Enterprise assistants, engineering copilots, and operations agents call business APIs, use MCP tools, and follow skills. Releases need coordinated review of endpoints, tool arguments, and procedures. |
-| **Business systems and open platforms integrating AI** | Ticketing, data, and engineering platforms expose capabilities to first-party clients, third-party apps, and multiple agents. Teams need to track what changes across their entry points and releases.  |
-| **Agent platforms and tool ecosystems**                | Shared tool libraries, plugin platforms, and workflow platforms combine services and skills from multiple teams. Maintainers need a versioned inventory, tool tests, and documentation for other teams. |
-
-IfaceForge works with local Git worktrees. Clone remote repositories locally before adding them. It supports single-service repositories, monorepos, and workflows that manage just one capability type. OpenAPI, Swagger, MCP capability manifests, and `SKILL.md` can be scanned across languages. Source recognition varies by framework and registration pattern. [Developer guide and compatibility](developer-guide.en.md)
-
-![The IfaceForge MCP workbench showing an isolated discovery, capability directory, and tool test form](assets/mcp-workbench.png)
 
 ## Quick start
 
-1. Install the desktop package for your system from [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases) and make Git available on `PATH`.
-2. Open IfaceForge and choose **Add project**. Pick a local Git worktree or a folder within it.
-3. Select **Scan project** to browse declarations, source observations and repository skills. In **MCP**, choose a service and **Docker · Linux**, then select **Review launch plan**. Docker needs the service image locally.
+1. Download the desktop package from the [latest stable release](https://github.com/qq940500529/ifaceforge/releases/latest) and make Git available on `PATH`.
+2. Open IfaceForge and choose **Add project**. Pick a local Git worktree or a directory within it. Clone remote repositories locally first.
+3. Select **Scan project** to browse API, MCP, and Skills definitions, their sources, and scan diagnostics.
 
-Windows x64 was verified on a local machine. Builds are available for macOS ARM64 and Linux x64. These platforms have no hands-on validation for this release. Community testing is welcome. Include your OS version, architecture, package format, and reproduction steps in a [GitHub issue](https://github.com/qq940500529/ifaceforge/issues/new/choose).
-
-## Inspect and test MCP
-
-The server directory shows tools, resources, resource templates, and prompts discovered from a temporary sandbox. Choose an item and use the **Details**, **Test**, and **History** tabs. Fill tool or prompt arguments, read a resource, or expand a template into a URI. Each test records the result and sandbox cleanup.
-
-Use **Save as case** to replay a check through the Tests page or the CLI. Save checks for all four types and run them together in a suite. You can also import OpenAPI, test HTTP requests, browse skills, and export a local Wiki.
-
-## Compare branches and commits
-
-Use the top bar to browse a branch, or open **Versions and comparison** to select two commits in the Git network. Review changes to API, MCP, and Skills definitions alongside file patches and sources. History pages load as requested. File scans run for the selected endpoints and reuse completed snapshots.
+| Platform        | Installation and validation                                                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Windows x64** | Run the EXE to select an installation folder and shortcuts. Interactive and silent installs both include the matching `ifg`. Verified locally. |
+| **macOS ARM64** | Open the DMG and drag the app to a writable folder. Builds available, with hands-on validation pending.                                        |
+| **Linux x64**   | Run the AppImage or install a DEB or RPM. Builds available, with hands-on validation pending.                                                  |
 
 > [!TIP]
-> See the [developer guide](developer-guide.en.md) for language-independent declarations, working examples, and the compatibility matrix.
+> Run `ifg --version --json` in a new Windows terminal after installation. Independent CLI packages are available for all three platforms. [CLI installation and reference](cli.md)
+
+## What you can do
+
+- **Scan and review.** Read OpenAPI, Swagger, MCP capability manifests, and `SKILL.md`. Trace supported source registrations to their files and lines, then compare branches or commits. Historical scans run for the selected revisions. [Developer guide and compatibility](developer-guide.en.md)
+- **Verify APIs and MCP.** Send HTTP requests and check responses with assertions. Read MCP declarations offline or start a temporary service to discover and test tools, resources, resource templates, and prompts. Save checks as cases, run suites, and review their results. [MCP test guide](mcp.md)
+- **Produce documentation and reports.** Generate a local Wiki, keep handwritten notes, and export Markdown, the catalog JSON, or comparison reports. [Desktop user guide](workbench.md)
+
+The desktop app manages multiple local Git projects with separate SQLite data. The desktop and `ifg` share project registrations, scans, and test records. [Desktop and CLI coverage](cli.md#desktop-actions-and-cli-equivalents)
+
+<details>
+<summary>View the MCP workbench</summary>
+
+![MCP capability directory, isolated discovery result, and tool test form](assets/mcp-workbench.png)
+
+</details>
+
+<details>
+<summary>View Git history and version comparison</summary>
+
+![Git network graph and changes to API, MCP, and Skills definitions](assets/version-comparison.png)
+
+</details>
+
+## Documentation and contributions
+
+| Task                                            | Documentation                                                                                                                                                                                         |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install and use the desktop app                 | [User guide](workbench.md)                                                                                                                                                                            |
+| Run scripts or connect an AI agent              | [CLI reference](cli.md) · [AI calling guide](cli-agent.md)                                                                                                                                            |
+| Develop scannable APIs, MCP servers, and Skills | [Developer guide](developer-guide.en.md)                                                                                                                                                              |
+| Read release changes and contribute             | [Changelog](https://github.com/qq940500529/ifaceforge/blob/main/CHANGELOG.md) · [Build and release](release.md) · [Contributing](https://github.com/qq940500529/ifaceforge/blob/main/CONTRIBUTING.md) |
 
 <details>
 <summary>Build from source</summary>
@@ -48,6 +60,6 @@ npm start</code></pre>
 <p>See the <a href="https://qq940500529.github.io/ifaceforge/release.html">release guide</a> for desktop packaging and validation commands.</p>
 </details>
 
-[CLI reference](cli.md) · [Contributing](https://github.com/qq940500529/ifaceforge/blob/main/CONTRIBUTING.md) · [Discussions](https://github.com/qq940500529/ifaceforge/discussions) · [Report an issue](https://github.com/qq940500529/ifaceforge/issues/new/choose)
+[Discussions](https://github.com/qq940500529/ifaceforge/discussions) · [Report an issue or share platform test results](https://github.com/qq940500529/ifaceforge/issues/new/choose) · [Security policy](https://github.com/qq940500529/ifaceforge/blob/main/SECURITY.md)
 
 [MIT](https://github.com/qq940500529/ifaceforge/blob/main/LICENSE) · Copyright (c) 2026 数链创元（天津）信息技术有限责任公司

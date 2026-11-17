@@ -181,6 +181,14 @@ it('merges route evidence, searches skill text and keeps the active snapshot whe
     expect(
       searchCatalog(repository, { query: '任务说明' }).items[0].observations[0].definition.references,
     ).toEqual([{ path: 'tasks/missing.md', status: 'missing' }]);
+    expect(snapshot.diagnostics).toContainEqual({
+      path: 'tasks/SKILL.md',
+      line: 5,
+      code: 'SKILL_REFERENCE_MISSING',
+      severity: 'warning',
+      message: 'Skill reference does not exist in this revision',
+      details: { target: 'tasks/missing.md' },
+    });
     write('openapi.yml', 'openapi: [invalid');
     const failed = await scanProject(project, repository, { includeUntracked: true });
     expect(failed.complete).toBe(false);

@@ -2,6 +2,7 @@ import { App, Button, Modal } from 'antd';
 import { unwrap } from './client.js';
 import { useLoad } from './components.js';
 import type { Language } from './i18n.js';
+import { projectInfo } from '../app/about.js';
 
 const logo = new URL('../../build/icons/icon.png', import.meta.url).href;
 
@@ -16,13 +17,15 @@ export function About({ lang, close }: { lang: Language; close: () => void }) {
           <img src={logo} alt="" width={56} height={56} />
           <div>
             <h2>
-              IfaceForge <span>{zh ? '接口工坊' : ''}</span>
+              {projectInfo.name} <span>{zh ? '接口工坊' : ''}</span>
             </h2>
             <p>{zh ? '本机 Git 项目的接口与测试工作台' : 'APIs, MCP, and skills in your local Git projects'}</p>
             <div className="about-facts">
               {metadata.data && <code>v{metadata.data.version}</code>}
               {!!metadata.error && <span>{zh ? '无法读取版本' : 'Version unavailable'}</span>}
-              <span>MIT {zh ? '许可证' : 'License'}</span>
+              <span>
+                {projectInfo.license} {zh ? '许可证' : 'License'}
+              </span>
             </div>
           </div>
         </div>
@@ -36,20 +39,20 @@ export function About({ lang, close }: { lang: Language; close: () => void }) {
           <dl>
             <div>
               <dt>{zh ? '桌面与界面' : 'Desktop and UI'}</dt>
-              <dd>Electron · React · Ant Design</dd>
+              <dd>{projectInfo.acknowledgements.desktop.join(' · ')}</dd>
             </div>
             <div>
               <dt>{zh ? '文档预览' : 'Document preview'}</dt>
-              <dd>react-markdown · remark-gfm</dd>
+              <dd>{projectInfo.acknowledgements.markdown.join(' · ')}</dd>
             </div>
             <div>
               <dt>{zh ? 'Windows 安装' : 'Windows setup'}</dt>
-              <dd>electron-builder · NSIS</dd>
+              <dd>{projectInfo.acknowledgements.windowsSetup.join(' · ')}</dd>
             </div>
           </dl>
         </section>
         <div className="about-footer">
-          <small>Copyright © 2026 数链创元（天津）信息技术有限责任公司</small>
+          <small>{projectInfo.copyright}</small>
           <Button
             onClick={() =>
               void unwrap(window.ifaceforge!.repository()).catch(() =>

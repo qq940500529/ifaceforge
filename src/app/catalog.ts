@@ -42,7 +42,7 @@ const ignored = new Set([
   'coverage',
 ]);
 const openApiName = /(?:^|\/)(?:openapi|swagger)(?:[._-][^/]*)?\.(?:ya?ml|json)$/i;
-export const scannerVersion = 6;
+export const scannerVersion = 7;
 const apiCoverageCodes = new Set(['DYNAMIC_ROUTE', 'HTTP_HANDLER_UNRESOLVED', 'EXPRESS_SOURCE_PARSE']);
 
 function hasApiVersion(path: string, text: string) {

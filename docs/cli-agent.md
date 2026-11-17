@@ -10,6 +10,8 @@ IfaceForge 用同一套桌面和 CLI 数据查找实际定义。开发时可以�
 
 ## 探索命令和选定项目
 
+桌面安装同时登记同版本的 `ifg`。升级后新开终端，使用 `where.exe ifg` 核对第一个命令路径，再用 `ifg --version --json` 读取 `data.version`。安装前已启动的 AI 进程可直接使用桌面安装目录下的 `bin\ifg.cmd`。
+
 ```text
 ifg --version --json
 ifg commands --json
@@ -28,7 +30,9 @@ ifg catalog list --project PROJECT --kind mcp --ref HEAD --limit 20 --json
 ifg skill list --project PROJECT --ref HEAD --json
 ifg git log --project PROJECT --ref BASE --ref TARGET --limit 24 --json
 ifg compare --project PROJECT --base BASE --target TARGET --json
+ifg git selection --project PROJECT --json
 ifg source show --project PROJECT --ref TARGET --path "openapi.yaml" --json
+ifg wiki export --project PROJECT --snapshot SNAPSHOT_ID --out catalog.json --json
 ```
 
 用 `data.items[]` 获取条目 ID，再用 `catalog show` 或 `skill show` 获取定义。保留 Git SHA、来源路径、行号和诊断。对比前后都使用同一项目 ID。初始化、刷新和翻页只读取 Git 元数据。扫描只处理当前选择的提交。MCP 离线清单可提供声明，运行时能力通过批准的隔离发现确认。
@@ -40,6 +44,7 @@ ifg source show --project PROJECT --ref TARGET --path "openapi.yaml" --json
 ```text
 ifg scan start --project PROJECT --json
 ifg task watch TASK_ID --project PROJECT --stream
+ifg task diagnostics TASK_ID --project PROJECT --severity warning --json
 ifg mcp targets --project PROJECT --json
 ifg mcp plan --project PROJECT --service SERVICE_ID --ref TARGET --json
 ifg mcp probe --project PROJECT --service SERVICE_ID --ref TARGET --approve FINGERPRINT --async --json
@@ -62,7 +67,9 @@ ifg mcp inventory --project PROJECT --service SERVICE_ID --mode native --json
 
 本机进程使用当前账户权限。只有明确需要本机启动时才选择 `native`。保持计划和执行的 `--ref`、`--mode`、`--protocol` 一致，工作区有变化时重新规划。测试先用 `mcp plan --mode native --file batch.json` 绑定精确步骤，再用同一文件和指纹运行 `mcp batch`。
 
-用 `ifg task show TASK_ID --project PROJECT --json` 查看扫描诊断。扫描期间或中断后的条目位于 `data.issues`，成功返回快照后的条目位于 `data.result.diagnostics`。终止扫描的错误位于 `data.error`。
+用 `task diagnostics` 读取 `data.issues`，其中包括已知的文件、行号和附加详情。可选 `--severity error`，也可用 `--format text --out scan-diagnostics.txt` 导出。检查指定提交中的契约与技能时运行 `ifg guide validate --project PROJECT --ref TARGET --json`。`SKILL_REFERENCE_MISSING` 的 `details.target` 是该提交中缺失文件的仓库相对路径。
+
+MCP 资源模板可先通过 `ifg mcp template-preview 'task://{id}' --args template-args.json --json` 查看 `data.variables` 和 `data.uri`。该预览无需启动服务。
 
 先核对目标和环境，再执行对外请求或修改本机状态的命令。敏感值用环境变量引用。读取 `ok`、`error.code` 和进程退出码。退出码 `1` 表示测试断言失败，可从 `data` 查看运行记录。后台命令返回任务 ID；轮询、跟踪或取消时复用该 ID。请求状态不明时先查运行记录，避免重复执行会改变目标状态的调用。
 

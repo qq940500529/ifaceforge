@@ -1,3 +1,28 @@
+!macro IfgRegisterCliPath action
+  InitPluginsDir
+  Push $OUTDIR
+  SetOutPath "$PLUGINSDIR"
+  File /oname=ifg-cli-path.ps1 "${BUILD_RESOURCES_DIR}\windows-cli-path.ps1"
+  Pop $R3
+  SetOutPath "$R3"
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ifg-cli-path.ps1" -Action "${action}" -Scope "$installMode" -InstallDirectory "$INSTDIR" -AppId "${APP_ID}" -ProductName "${PRODUCT_NAME}"'
+  Pop $R3
+  ${If} $R3 != "0"
+    DetailPrint "Could not update the IfaceForge CLI registration. ($R3)"
+    SetErrorLevel 3
+    Abort
+  ${EndIf}
+  System::Call 'user32::SendMessageTimeoutW(p 0xffff, i 0x001a, p 0, w "Environment", i 2, i 1000, *p .r3) p'
+!macroend
+
+!ifdef BUILD_UNINSTALLER
+  !macro customUnInstallSection
+    Section "un.IfaceForge CLI"
+      !insertmacro IfgRegisterCliPath uninstall
+    SectionEnd
+  !macroend
+!endif
+
 !ifndef BUILD_UNINSTALLER
   !include "nsDialogs.nsh"
 
@@ -85,6 +110,26 @@
     !insertmacro IfgInstallStage "$(IfgConfigureShortcuts)"
     !insertmacro IfgApplyShortcut $IfgStartMenu $newStartMenuLink
     !insertmacro IfgApplyShortcut $IfgDesktop $newDesktopLink
+    !insertmacro IfgInstallStage "$(IfgRegisterCli)"
+    CreateDirectory "$INSTDIR\bin"
+    ClearErrors
+    FileOpen $R3 "$INSTDIR\bin\ifg.cmd" w
+    IfErrors ifg_cli_failed
+    FileWrite $R3 '@echo off$\r$\n'
+    FileWrite $R3 'setlocal DisableDelayedExpansion$\r$\n'
+    FileWrite $R3 'set "ELECTRON_RUN_AS_NODE=1"$\r$\n'
+    FileWrite $R3 '"%~dp0..\${APP_EXECUTABLE_FILENAME}" "%~dp0..\resources\app.asar\dist\cli\main.js" %*$\r$\n'
+    FileWrite $R3 'exit /b %errorlevel%$\r$\n'
+    FileClose $R3
+    IfErrors ifg_cli_failed
+    !insertmacro IfgInstallStage "$(IfgFileInstalled) bin\ifg.cmd"
+    !insertmacro IfgRegisterCliPath install
+    Goto ifg_cli_done
+    ifg_cli_failed:
+      DetailPrint "$(IfgFileMissing) bin\ifg.cmd"
+      SetErrorLevel 3
+      Abort
+    ifg_cli_done:
     StrCpy $launchLink "$appExe"
     ${If} ${FileExists} "$newStartMenuLink"
       StrCpy $launchLink "$newStartMenuLink"
@@ -114,6 +159,7 @@
     LangString IfgFileInstalled ${LANG_ENGLISH} "Wrote file"
     LangString IfgFileMissing ${LANG_ENGLISH} "Could not verify written file"
     LangString IfgRegisterApp ${LANG_ENGLISH} "Registering IfaceForge with Windows…"
+    LangString IfgRegisterCli ${LANG_ENGLISH} "Installing the matching ifg command and updating PATH…"
     LangString IfgConfigureShortcuts ${LANG_ENGLISH} "Applying shortcut choices…"
     LangString IfgShortcutWritten ${LANG_ENGLISH} "Wrote shortcut"
     LangString IfgShortcutRemoved ${LANG_ENGLISH} "Removed shortcut"
@@ -133,6 +179,7 @@
     LangString IfgFileInstalled ${LANG_SIMPCHINESE} "已写入文件"
     LangString IfgFileMissing ${LANG_SIMPCHINESE} "无法核对已写入文件"
     LangString IfgRegisterApp ${LANG_SIMPCHINESE} "正在向 Windows 注册 IfaceForge…"
+    LangString IfgRegisterCli ${LANG_SIMPCHINESE} "正在安装同版本 ifg 命令并更新 PATH…"
     LangString IfgConfigureShortcuts ${LANG_SIMPCHINESE} "正在应用快捷方式选项…"
     LangString IfgShortcutWritten ${LANG_SIMPCHINESE} "已写入快捷方式"
     LangString IfgShortcutRemoved ${LANG_SIMPCHINESE} "已删除快捷方式"

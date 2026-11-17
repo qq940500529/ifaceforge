@@ -18,6 +18,7 @@ export interface Diagnostic {
   severity?: 'info' | 'warning' | 'error';
   code: string;
   message: string;
+  details?: unknown;
 }
 export interface Entity {
   id: string;
