@@ -230,7 +230,7 @@ export async function openNative(
   progress?: (stage: 'launch' | 'ready' | 'negotiate') => void,
 ) {
   const config = profile.mcp!;
-  const signal = AbortSignal.any([parent, AbortSignal.timeout(45_000)]);
+  const signal = AbortSignal.any([parent, AbortSignal.timeout(process.platform === 'win32' ? 90_000 : 45_000)]);
   const instance = 'ifaceforge-native-' + randomUUID();
   let stage: 'prepare' | 'launch' | 'ready' | 'negotiate' = 'prepare';
   let temporary: string | undefined;
@@ -318,18 +318,12 @@ export async function openNative(
     stage = 'launch';
     progress?.(stage);
     if (config.transport === 'stdio') {
-      const start = () => new ManagedMcpStdio(() => startMcpProcess(command, plan.args, cwd, env), capture);
-      // The Windows supervisor initializes containment before forwarding the protocol.
-      const connectTimeout = process.platform === 'win32' ? 20_000 : undefined;
+      const start = () => new ManagedMcpStdio(() => startMcpProcess(command, plan.args, cwd, env, true), capture);
       transport = start();
       stage = 'negotiate';
       progress?.(stage);
       try {
-        session = await McpSession.connect(profile, root, bindings, signal, {
-          transport,
-          connectTimeout,
-          probeTimeout: connectTimeout,
-        });
+        session = await McpSession.connect(profile, root, bindings, signal, { transport });
       } catch (error) {
         if (
           config.protocolVersion ||
@@ -341,11 +335,7 @@ export async function openNative(
           throw error;
         await transport.close();
         transport = start();
-        session = await McpSession.connect(profile, root, bindings, signal, {
-          transport,
-          legacy: true,
-          connectTimeout,
-        });
+        session = await McpSession.connect(profile, root, bindings, signal, { transport, legacy: true });
       }
     } else {
       child = startMcpProcess(command, plan.args, cwd, env);

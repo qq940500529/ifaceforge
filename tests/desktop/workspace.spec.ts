@@ -748,7 +748,7 @@ test('reviews an isolated MCP launch and operates the capability directory and t
 });
 
 test('reviews the local MCP process and confirms a test at a narrow width', async ({}, info) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const sample = fixture('mcp-isolation');
   sample.write('.mcp.json', {
     mcpServers: {
@@ -805,8 +805,9 @@ test('reviews the local MCP process and confirms a test at a narrow width', asyn
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     await button('Review launch plan').click();
     await dialog.getByRole('button', { name: 'Start and discover' }).click();
-    await expect(page.getByText('Local process closed', { exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByText('Local process closed', { exact: true })).toBeVisible({ timeout: 90_000 });
     const list = page.getByRole('region', { name: 'MCP capability list' });
+    await expect(list.getByRole('button', { name: 'echo', exact: true })).toBeVisible();
     await expect(button('Local results')).toHaveAttribute('aria-pressed', 'true');
     await button('Isolated results').click();
     await expect(list).toHaveCount(0);
@@ -826,7 +827,7 @@ test('reviews the local MCP process and confirms a test at a narrow width', asyn
     await dialog.getByRole('button', { name: 'Start and test' }).click();
     await expect(
       page.locator('.mcp-inspector pre.code:visible').filter({ hasText: 'native desktop check' }).first(),
-    ).toBeVisible({ timeout: 45_000 });
+    ).toBeVisible({ timeout: 90_000 });
     await page.screenshot({ path: info.outputPath('mcp-native-result.png') });
 
     await page.getByRole('combobox', { name: 'MCP service' }).click();

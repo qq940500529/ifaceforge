@@ -133,7 +133,7 @@ it('reviews native launch, retries a legacy stdio server, verifies cleanup and b
   } finally {
     sample.destroy();
   }
-}, 100_000);
+}, 150_000);
 
 it('uses an approved native loopback endpoint and closes the HTTP process', async () => {
   const sample = fixture('mcp-isolation');

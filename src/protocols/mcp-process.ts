@@ -1,9 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { StringDecoder } from 'node:string_decoder';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client';
+
+const windowsReady = 'IFG_MCP_SUPERVISOR_READY';
 
 // The supervisor joins the job before starting any repository code. Its job handle
 // is non-inheritable, so terminating the supervisor also terminates descendants.
@@ -109,6 +111,7 @@ public static class IfgJob {
 }
 '@
 [IfgJob]::Contain()
+if ($launch.notifyReady) { [Console]::Error.WriteLine('${windowsReady}') }
 exit [IfgJob]::Run($launch.command, [string[]]@($launch.args), $launch.cwd)
 `;
 
@@ -116,7 +119,13 @@ export function windowsPowerShell() {
   return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-export function startMcpProcess(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv) {
+export function startMcpProcess(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  notifyReady = false,
+) {
   const options = {
     cwd,
     env,
@@ -125,8 +134,9 @@ export function startMcpProcess(command: string, args: string[], cwd: string, en
     stdio: 'pipe',
   } as const;
   if (process.platform !== 'win32') return spawn(command, args, options);
+  const supervisor = windowsPowerShell();
   return spawn(
-    windowsPowerShell(),
+    supervisor,
     [
       '-NoLogo',
       '-NoProfile',
@@ -134,7 +144,12 @@ export function startMcpProcess(command: string, args: string[], cwd: string, en
       '-EncodedCommand',
       Buffer.from(windowsSupervisor, 'utf16le').toString('base64'),
     ],
-    { ...options, env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd }) } },
+    {
+      ...options,
+      // Initialize the supervisor outside the repository. Only its contained child enters the worktree.
+      cwd: dirname(supervisor),
+      env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd, notifyReady }) },
+    },
   );
 }
 
@@ -186,7 +201,8 @@ export class ManagedMcpStdio implements Transport {
   async start() {
     const child = this.startProcess();
     this.child = child;
-    child.stderr.on('data', this.stderr);
+    const ready = process.platform === 'win32' ? this.waitForWindowsSupervisor(child) : undefined;
+    if (!ready) child.stderr.on('data', this.stderr);
     child.stdout.on('data', (chunk: Buffer) => {
       this.pending += this.utf8.write(chunk);
       if (this.pending.length > 2 * 1024 * 1024) {
@@ -210,7 +226,41 @@ export class ManagedMcpStdio implements Transport {
     child.stdin.on('error', (error) => this.onerror?.(error));
     child.on('error', (error) => this.onerror?.(error));
     child.once('close', () => this.notifyClose());
-    await once(child, 'spawn');
+    await Promise.all([once(child, 'spawn'), ready]);
+  }
+
+  private waitForWindowsSupervisor(child: ChildProcessWithoutNullStreams) {
+    const marker = Buffer.from(windowsReady + '\r\n');
+    let pending = Buffer.alloc(0);
+    return new Promise<void>((resolve, reject) => {
+      function fail(error?: Error) {
+        reject(error ?? new Error('MCP supervisor exited before launch'));
+      }
+      const capture = (chunk: Buffer) => {
+        pending = Buffer.concat([pending, chunk]);
+        const position = pending.indexOf(marker);
+        if (position !== -1) {
+          child.stderr.off('data', capture);
+          child.stderr.on('data', this.stderr);
+          child.off('close', closed);
+          child.off('error', fail);
+          if (position > 0) this.stderr(pending.subarray(0, position));
+          const remaining = pending.subarray(position + marker.length);
+          if (remaining.length) this.stderr(remaining);
+          resolve();
+        } else if (pending.length > marker.length) {
+          this.stderr(pending.subarray(0, -marker.length));
+          pending = pending.subarray(-marker.length);
+        }
+      };
+      const closed = () => {
+        if (pending.length) this.stderr(pending);
+        fail();
+      };
+      child.stderr.on('data', capture);
+      child.once('close', closed);
+      child.once('error', fail);
+    });
   }
 
   private notifyClose() {

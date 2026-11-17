@@ -1,9 +1,21 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/qq940500529/ifaceforge/main/build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge</h1>
-  <p><strong>A desktop interface and testing workbench for local Git projects</strong></p>
+  <p><strong>A local workbench for Git repositories with HTTP APIs, MCP servers, or AI agent skills</strong></p>
   <p><a href="https://github.com/qq940500529/ifaceforge/releases">Download</a> · <a href="https://qq940500529.github.io/ifaceforge/mcp.html">MCP guide</a> · <a href="https://qq940500529.github.io/ifaceforge/">简体中文</a> · <a href="https://qq940500529.github.io/ifaceforge/cli.html">CLI reference</a></p>
 </div>
+
+## Which repositories does it support?
+
+IfaceForge reads local Git worktrees with at least one of the following kinds of content. A single service, a monorepo, or a skills-only repository all fit. Clone a remote repository locally before adding its worktree.
+
+| Repository type                 | Inputs                                                                      | What you can do                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| HTTP services and API contracts | Swagger, OpenAPI, recognizable server routes                                | Browse endpoints, compare definitions, send requests, and save assertions                              |
+| MCP servers and AI tools        | Launch configurations, capability manifests, recognizable SDK registrations | Inspect tools, resources, templates, and prompts, then run a temporary instance to verify capabilities |
+| AI agent skills and workflows   | `SKILL.md` and referenced files                                             | Search, read, and compare skills, then generate a local Wiki                                           |
+
+Standard declarations work across programming languages. Source recognition varies by language, framework, and registration pattern. For capabilities built at runtime, provide a manifest or inspect the running service. [Developer guide and compatibility](developer-guide.en.md)
 
 ![The IfaceForge MCP workbench showing an isolated discovery, capability directory, and tool test form](assets/mcp-workbench.png)
 
