@@ -1,21 +1,21 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/qq940500529/ifaceforge/main/build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge</h1>
-  <p><strong>A local workbench for Git repositories with HTTP APIs, MCP servers, or AI agent skills</strong></p>
+  <p><strong>A local capability workbench for AI applications, agent platforms, and AI integrations</strong></p>
   <p><a href="https://github.com/qq940500529/ifaceforge/releases">Download</a> · <a href="https://qq940500529.github.io/ifaceforge/mcp.html">MCP guide</a> · <a href="https://qq940500529.github.io/ifaceforge/">简体中文</a> · <a href="https://qq940500529.github.io/ifaceforge/cli.html">CLI reference</a></p>
 </div>
 
-## Which repositories does it support?
+## Which projects is IfaceForge for?
 
-IfaceForge reads local Git worktrees with at least one of the following kinds of content. A single service, a monorepo, or a skills-only repository all fit. Clone a remote repository locally before adding its worktree.
+When applications and AI agents use the same business capabilities, teams often maintain three entry points. **APIs** let applications call a service. **MCP** lets agents discover tools and resources and interact with them. **Skills** tell agents when to use those capabilities and how to complete a task. IfaceForge lets teams review all three at the same Git revision and rerun interface tests when they change.
 
-| Repository type                 | Inputs                                                                      | What you can do                                                                                        |
-| ------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| HTTP services and API contracts | Swagger, OpenAPI, recognizable server routes                                | Browse endpoints, compare definitions, send requests, and save assertions                              |
-| MCP servers and AI tools        | Launch configurations, capability manifests, recognizable SDK registrations | Inspect tools, resources, templates, and prompts, then run a temporary instance to verify capabilities |
-| AI agent skills and workflows   | `SKILL.md` and referenced files                                             | Search, read, and compare skills, then generate a local Wiki                                           |
+| Project type                                           | Why these capabilities need managing                                                                                                                                                                    |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **AI applications and agent products**                 | Enterprise assistants, engineering copilots, and operations agents call business APIs, use MCP tools, and follow skills. Releases need coordinated review of endpoints, tool arguments, and procedures. |
+| **Business systems and open platforms integrating AI** | Ticketing, data, and engineering platforms expose capabilities to first-party clients, third-party apps, and multiple agents. Teams need to track what changes across their entry points and releases.  |
+| **Agent platforms and tool ecosystems**                | Shared tool libraries, plugin platforms, and workflow platforms combine services and skills from multiple teams. Maintainers need a versioned inventory, tool tests, and documentation for other teams. |
 
-Standard declarations work across programming languages. Source recognition varies by language, framework, and registration pattern. For capabilities built at runtime, provide a manifest or inspect the running service. [Developer guide and compatibility](developer-guide.en.md)
+IfaceForge works with local Git worktrees. Clone remote repositories locally before adding them. It supports single-service repositories, monorepos, and workflows that manage just one capability type. OpenAPI, Swagger, MCP capability manifests, and `SKILL.md` can be scanned across languages. Source recognition varies by framework and registration pattern. [Developer guide and compatibility](developer-guide.en.md)
 
 ![The IfaceForge MCP workbench showing an isolated discovery, capability directory, and tool test form](assets/mcp-workbench.png)
 

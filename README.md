@@ -1,8 +1,8 @@
 <div align="center">
   <img src="build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge · 接口工坊</h1>
-  <p><strong>面向 HTTP API、MCP 服务和 AI 技能仓库的本地工作台</strong></p>
-  <p>扫描 Git 工作树里的接口与技能，比较分支或提交，把验证保存为可复跑的用例。</p>
+  <p><strong>面向 AI 应用、Agent 平台和 AI 集成项目的本地能力工作台</strong></p>
+  <p>在同一 Git 版本下查看 API、MCP 与 Skills，审查变更，并把接口验证保存为可复跑的用例。</p>
   <p>
     <a href="https://github.com/qq940500529/ifaceforge/releases"><img alt="下载桌面安装包" src="https://img.shields.io/github/v/release/qq940500529/ifaceforge?include_prereleases&amp;label=%E4%B8%8B%E8%BD%BD&amp;color=245fc4"></a>
     <a href="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml"><img alt="三平台验证" src="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml/badge.svg"></a>
@@ -13,15 +13,15 @@
 
 ## 适用项目
 
-IfaceForge 读取本机 Git 工作树，适合包含下列任一类内容的仓库。单服务仓库、多服务仓库和只维护技能的仓库都可以使用。远程仓库先克隆到本机，再选择工作树。
+当一项业务能力既供应用调用，也供 AI Agent 使用，团队往往需要一起维护三类入口。**API** 提供程序调用的接口，**MCP** 让 Agent 发现和调用工具或读取资源，**Skills** 告诉 Agent 何时使用能力、按什么步骤完成任务。接口、工具参数或操作流程变更时，可以在同一 Git 版本下审查这些入口，并复跑接口测试。
 
-| 仓库类型                | 可用材料                                  | 可以做什么                                                 |
-| ----------------------- | ----------------------------------------- | ---------------------------------------------------------- |
-| HTTP 服务和接口契约仓库 | Swagger、OpenAPI、可识别的服务端路由      | 浏览接口、比较定义、发送请求并保存断言                     |
-| MCP 服务和 AI 工具仓库  | MCP 启动配置、能力清单、可识别的 SDK 注册 | 查看工具、资源、资源模板与提示词，临时启动服务验证实际能力 |
-| AI 技能和工作流仓库     | `SKILL.md` 及其引用的文件                 | 搜索、阅读和比较技能，生成本地 Wiki                        |
+| 项目类型                         | 为什么需要管理这些能力                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **AI 应用与 Agent 产品**         | 如企业助手、研发 Copilot、自动化运维助手。产品调用业务 API，Agent 通过 MCP 使用工具，Skills 记录处理流程。发布前需要一起核对接口、工具参数和操作步骤。 |
+| **接入 AI 的业务系统与开放平台** | 如工单、数据或工程软件平台。同一项业务能力可能同时服务现有客户端、第三方应用和多个 Agent，团队需要核对各入口在不同版本中的变化。                       |
+| **Agent 平台与工具生态**         | 如团队共享工具库、插件平台或工作流平台。多个团队维护服务及技能，平台需要按 Git 版本盘点可用能力、验证工具调用并整理交接文档。                          |
 
-使用标准声明的扫描与开发语言无关。源码识别随语言、框架和注册方式而异。对于运行时动态生成的能力，可提交声明或临时启动服务验证。[开发指南与兼容范围](docs/developer-guide.md)
+支持本机 Git 工作树。远程仓库先克隆到本机，单服务和多服务仓库都可添加，也可按需管理其中一类能力。OpenAPI、Swagger、MCP 能力清单和 `SKILL.md` 可跨语言扫描，源码识别随框架和注册方式而异。[开发指南与兼容范围](docs/developer-guide.md)
 
 <a href="docs/mcp.md"><img src="docs/assets/mcp-workbench.png" alt="IfaceForge 隔离发现结果、能力目录与工具测试表单"></a>
 
