@@ -1,7 +1,7 @@
 <div align="center">
   <img src="build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge · 接口工坊</h1>
-  <p><strong>面向 AI 应用、Agent 平台和 AI 集成项目的本地能力工作台</strong></p>
+  <p><strong>面向 AI 应用项目的接口与技能工作台</strong></p>
   <p>在同一 Git 版本下查看 API、MCP 与 Skills，审查变更，并把接口验证保存为可复跑的用例。</p>
   <p>
     <a href="https://github.com/qq940500529/ifaceforge/releases"><img alt="下载桌面安装包" src="https://img.shields.io/github/v/release/qq940500529/ifaceforge?include_prereleases&amp;label=%E4%B8%8B%E8%BD%BD&amp;color=245fc4"></a>

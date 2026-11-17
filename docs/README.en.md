@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/qq940500529/ifaceforge/main/build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge</h1>
-  <p><strong>A local capability workbench for AI applications, agent platforms, and AI integrations</strong></p>
+  <p><strong>An interface and skills workbench for AI application projects</strong></p>
   <p><a href="https://github.com/qq940500529/ifaceforge/releases">Download</a> · <a href="https://qq940500529.github.io/ifaceforge/mcp.html">MCP guide</a> · <a href="https://qq940500529.github.io/ifaceforge/">简体中文</a> · <a href="https://qq940500529.github.io/ifaceforge/cli.html">CLI reference</a></p>
 </div>
 
