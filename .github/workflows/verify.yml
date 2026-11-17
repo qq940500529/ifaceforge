@@ -50,7 +50,11 @@ jobs:
         run: |
           docker pull node:26-alpine
           echo 'IFG_TEST_DOCKER=1' >> "$GITHUB_ENV"
-      - run: npm run test:integration
+      - name: Run integration tests on Windows
+        if: runner.os == 'Windows'
+        run: npm run test:integration -- --no-file-parallelism
+      - if: runner.os != 'Windows'
+        run: npm run test:integration
       - if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium
       - if: runner.os != 'Linux'
@@ -105,7 +109,7 @@ jobs:
         run: |
           npm run package:cli
           node scripts/check-package.mjs artifacts/desktop/ifaceforge-cli-*.tar.gz
-      - name: Verify Windows installer shortcut options
+      - name: Verify Windows installer shortcuts and matching CLI
         if: runner.os == 'Windows'
         shell: pwsh
         run: |

@@ -1,10 +1,10 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vitest';
-import { address, close, fixture, ifg, repositoryRoot } from '../support/fixture.js';
+import { address, close, fixture, ifg, ifgStdin, repositoryRoot } from '../support/fixture.js';
 
 test('coordinates persistent project tasks and version exports from separate CLI processes', async () => {
   const sample = fixture();
@@ -20,6 +20,22 @@ test('coordinates persistent project tasks and version exports from separate CLI
     expect(machine.automation.taskProgress).toContain('--stream');
     expect(machine.items.find((item: { name: string }) => item.name === 'project delete').writes).toBe(true);
     expect((await run('schema', 'request')).result.ok).toBe(true);
+    expect((await run('about')).result.data).toMatchObject({
+      name: 'IfaceForge',
+      license: 'MIT',
+      acknowledgements: { markdown: ['react-markdown', 'remark-gfm'] },
+    });
+    expect(
+      ifgStdin(sample.root, { id: 'one two' }, 'mcp', 'template-preview', 'task://{id}{?view}', '--args', '-')
+        .result.data,
+    ).toMatchObject({
+      uri: 'task://one%20two',
+      variables: [
+        { name: 'id', required: true },
+        { name: 'view', required: false },
+      ],
+    });
+    expect((await run('mcp', 'template-preview', 'task://{id}')).exit).toBe(2);
     const nested = join(sample.root, 'child folder');
     mkdirSync(nested);
     expect((await run('project', 'inspect', nested)).result.data.root).toBe(sample.root);
@@ -37,6 +53,26 @@ test('coordinates persistent project tasks and version exports from separate CLI
       service: 'extra',
       tools: [{ name: 'read-version' }],
     });
+    const skill = 'skills/read-example/SKILL.md';
+    const missed = 'skills/read-example/references/missing.md';
+    const skillPath = join(sample.root, skill);
+    mkdirSync(dirname(skillPath), { recursive: true });
+    writeFileSync(join(dirname(skillPath), 'available.md'), '# Available\n');
+    writeFileSync(
+      skillPath,
+      [
+        '---',
+        'name: read-example',
+        'description: Review an example.',
+        '---',
+        '[Local](available.md#available) · [Jump](#related) · [External](https://example.test/demo)',
+        '~~~markdown',
+        '[In code](references/example.md)',
+        '~~~',
+        'Read [the example](references/missing.md).',
+        '',
+      ].join('\r\n'),
+    );
     commit('added offline capability');
     const head = git('rev-parse', 'HEAD');
     const log = (await run('git', 'log', '--ref', 'baseline', '--ref', 'feature', '--format', 'graph')).result
@@ -47,11 +83,38 @@ test('coordinates persistent project tasks and version exports from separate CLI
       (await run('git', 'select', '--base', 'baseline', '--target', 'feature', '--mode', 'branches')).result.data
         .target,
     ).toBe('feature');
+    expect((await run('git', 'selection')).result.data).toMatchObject({ mode: 'branches', target: 'feature' });
+    const expectedIssue = {
+      code: 'SKILL_REFERENCE_MISSING',
+      severity: 'warning',
+      path: skill,
+      line: 9,
+      details: { target: missed },
+    };
+    const validation = (await run('guide', 'validate', '--ref', 'HEAD')).result.data;
+    expect(validation.commit).toBe(head);
+    expect(validation.issues.filter((entry: { path: string }) => entry.path === skill)).toMatchObject([
+      expectedIssue,
+    ]);
 
     const scan = (await run('scan', 'start')).result.data;
     expect(scan.project).toBe(project);
     const watched = await run('task', 'watch', scan.id);
     expect(watched.result.data).toMatchObject({ state: 'complete', result: { complete: true } });
+    const issueLog = join(sample.data, 'scan warnings.txt');
+    const warnings = await run('task', 'diagnostics', scan.id, '--severity', 'warning');
+    expect(warnings.result.data.issues).toContainEqual(expect.objectContaining(expectedIssue));
+    expect((await run('task', 'diagnostics', scan.id, '--severity', 'error')).result.data.issues).toEqual([]);
+    expect((await run('task', 'diagnostics', scan.id, '--severity', 'unknown')).exit).toBe(2);
+    expect((await run('task', 'diagnostics', scan.id, '--format', 'text', '--out', issueLog)).exit).toBe(0);
+    const issueText = readFileSync(issueLog, 'utf8');
+    expect(issueText).toContain(`[WARNING] ${expectedIssue.code}\n${skill}:9`);
+    expect(issueText).toContain(missed);
+    const wiki = await run('wiki', 'preview', '--lang', 'en');
+    const exported = join(sample.data, 'wiki catalogue.json');
+    expect((await run('wiki', 'export', '--lang', 'en', '--out', exported)).exit).toBe(0);
+    expect(JSON.parse(readFileSync(exported, 'utf8'))).toEqual(wiki.result.data.catalog);
+    expect((await run('wiki', 'export', '--out', exported)).exit).toBe(3);
     const stream = execFileSync(
       process.execPath,
       [join(repositoryRoot, 'dist', 'cli', 'main.js'), 'task', 'watch', scan.id, '--stream'],
@@ -70,6 +133,7 @@ test('coordinates persistent project tasks and version exports from separate CLI
     ).toMatchObject({ schemaVersion: 1, event: 'task', task: { id: scan.id, state: 'complete' } });
     const comparison = (await run('compare', '--base', 'baseline', '--target', 'feature', '--async')).result.data;
     expect((await run('task', 'watch', comparison.id)).result.data.result.target.sha).toBe(head);
+    expect((await run('task', 'diagnostics', comparison.id)).exit).toBe(2);
     const path = join(sample.data, '对比报告.md');
     expect(
       (

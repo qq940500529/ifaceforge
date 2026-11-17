@@ -16,13 +16,16 @@
 
 安装期间，**安装详情** 页显示进度、实际步骤和逐文件记录。文件写入后会记录操作和相对路径。安装结束后仍可查看记录，右键详情列表可复制，再按向导按钮继续。
 
+向导和静默安装均把同版本的 `ifg.cmd` 写入安装目录的 `bin`，并登记到对应 Windows 安装范围的 `PATH`。当前用户安装会从用户 `PATH` 移除识别出的旧版独立 CLI 登记，保留该独立包的文件。新开终端执行 `where.exe ifg` 和 `ifg --version --json`，核对路径和版本。已经运行的自动化可使用安装目录下 `bin\ifg.cmd` 的完整路径。卸载会移除由安装器登记的路径。
+
 自动化使用同一个 EXE。以下 PowerShell 示例为当前用户安装，等待安装程序退出并检查退出码。
 
 ```powershell
-$installer = (Resolve-Path '.\IfaceForge-0.3.0-preview.5-win-x64.exe').Path
+$installer = (Resolve-Path '.\IfaceForge-1.0.1-win-x64.exe').Path
 $install = Join-Path $env:LOCALAPPDATA 'Programs\IfaceForge'
-$result = Start-Process -FilePath $installer -ArgumentList "/S /currentuser /STARTMENU=1 /DESKTOP=0 /D=$install" -Wait -PassThru
+$result = Start-Process -FilePath $installer -ArgumentList "/S /currentuser /STARTMENU=1 /DESKTOP=0 /D=$install" -WindowStyle Hidden -Wait -PassThru
 if ($result.ExitCode -ne 0) { throw "IfaceForge 安装失败，退出码 $($result.ExitCode)" }
+& (Join-Path $install 'bin\ifg.cmd') --version --json
 ```
 
 `/S` 启用静默安装。`/STARTMENU=0|1` 和 `/DESKTOP=0|1` 分别禁用或启用快捷方式，省略时采用向导的默认值。显式禁用会移除该安装范围内已有的对应 IfaceForge 快捷方式。提供 `/D=` 时使用绝对路径并放在参数末尾，路径含空格时也不加引号。静默安装完成后由调用者决定是否启动应用。

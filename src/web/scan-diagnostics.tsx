@@ -5,23 +5,15 @@ import { useLoad } from './components.js';
 import type { ScanTask } from '../desktop/protocol.js';
 import type { Language } from './i18n.js';
 import type { Diagnostic } from '../scanner/model.js';
+import {
+  diagnosticDetails,
+  diagnosticLocation,
+  diagnosticText,
+  scanDiagnostics,
+} from '../app/scan-diagnostics.js';
 
 type Filter = 'all' | 'error' | 'warning';
-type Issue = Diagnostic & { details?: unknown };
-const location = (issue: Issue) => issue.path && (issue.line ? `${issue.path}:${issue.line}` : issue.path);
-const extra = (issue: Issue) => (issue.details == null ? '' : JSON.stringify(issue.details, null, 2));
 const pageSize = 15;
-
-function diagnosticText(issue: Issue) {
-  return [
-    `[${issue.severity === 'error' ? 'ERROR' : 'WARNING'}] ${issue.code}`,
-    location(issue),
-    issue.message,
-    extra(issue),
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
 
 export function ScanDiagnostics({
   task,
@@ -43,15 +35,12 @@ export function ScanDiagnostics({
     [task.project, task.id, task.state, task.warnings, task.errors],
   );
   const record = messages.data ?? task;
-  const issues: Issue[] = (record.result?.diagnostics ?? record.issues ?? []).filter(
-    (issue) => issue.severity !== 'info',
-  );
-  if (record.error) issues.unshift({ ...record.error, severity: 'error' });
+  const issues = scanDiagnostics(record).filter((issue) => issue.severity !== 'info');
   const errors = issues.filter((issue) => issue.severity === 'error').length;
   const shown = filter === 'all' ? issues : issues.filter((issue) => (issue.severity ?? 'warning') === filter);
   const current = Math.min(page, Math.max(1, Math.ceil(shown.length / pageSize)));
 
-  async function copy(items: Issue[]) {
+  async function copy(items: Diagnostic[]) {
     try {
       await copyText(items.map(diagnosticText).join('\n\n'));
       void message.success(zh ? '已复制到剪贴板' : 'Copied to clipboard');
@@ -108,9 +97,11 @@ export function ScanDiagnostics({
                   {zh ? '复制此条' : 'Copy entry'}
                 </Button>
               </div>
-              {location(issue) && <code className="scan-diagnostic-location">{location(issue)}</code>}
+              {diagnosticLocation(issue) && (
+                <code className="scan-diagnostic-location">{diagnosticLocation(issue)}</code>
+              )}
               <p>{issue.message}</p>
-              {extra(issue) && <pre className="code">{extra(issue)}</pre>}
+              {diagnosticDetails(issue) && <pre className="code">{diagnosticDetails(issue)}</pre>}
             </li>
           ))}
         </ul>

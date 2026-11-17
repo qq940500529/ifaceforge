@@ -2,13 +2,16 @@
 
 Run commands in a Git working tree, or supply `--project <id|directory>`. The CLI uses the desktop app's registry and project data. With a source build, replace `ifg` below with `node /path/to/ifaceforge/dist/cli/main.js`, or run `npm link` from the built IfaceForge repository to register the command.
 
-Download the CLI archive for Windows x64, Linux x64 or Apple Silicon macOS from [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases). Extract it to a location you control and add the extracted `ifaceforge` directory to `PATH`. The archive includes its Node.js runtime. Git is an external dependency. Automation can start with `ifg guide cli --json`. [AI 调用指南](cli-agent.md)
+The Windows desktop installer installs the matching `ifg` and adds it to `PATH` for interactive and silent installs. Open a new terminal and run `where.exe ifg` and `ifg --version --json`. A process running since before the upgrade can use `bin\ifg.cmd` inside the desktop installation directory. [Windows installer options](workbench.md#windows-交互与静默安装)
+
+For CLI-only use, download the independent archive for Windows x64, Linux x64 or Apple Silicon macOS from [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases). Extract it to a location you control and add the extracted `ifaceforge` directory to `PATH`. The archive includes its Node.js runtime. Git is an external dependency. Automation can start with `ifg guide cli --json`. [AI 调用指南](cli-agent.md)
 
 ## Discover the contract
 
 ```sh
 ifg --help
 ifg --version
+ifg about --json
 ifg commands --json
 ifg guide cli --json
 ifg schema request
@@ -56,11 +59,15 @@ The initial scan uses tracked files. Add `--include-untracked` for new, unignore
 ifg scan start --project <project-id> --json
 ifg task list --all --json
 ifg task show <task-id> --json
+ifg task diagnostics <scan-task-id> --severity warning --json
+ifg task diagnostics <scan-task-id> --format text --out scan-diagnostics.txt
 ifg task watch <task-id> --stream
 ifg task cancel <task-id> --json
 ```
 
 `api send`, MCP test commands, `test run`, `compare` and `git browse` accept `--async`. A started operation returns its task or run ID. Use `--project` when looking up a completed HTTP or MCP run. The desktop and CLI share the local workspace service; closing the window lets active work finish. `service status` reports availability. `service stop` stops the idle service. `--force` also ends active tasks and sessions.
+
+`task diagnostics` accepts `all`, `info`, `warning` and `error`. It includes diagnostic codes, known locations and details, as well as any error that ended the scan.
 
 ## Browse and compare Git versions
 
@@ -71,6 +78,7 @@ ifg git log --ref release/1 --ref release/2 --format graph
 ifg git log --ref release/2 --query 'add endpoint' --limit 10 --json
 ifg git commit HEAD --json
 ifg git browse --ref release/2 --json
+ifg git selection --json
 ifg catalog list --kind mcp --ref release/2 --json
 ifg skill list --ref release/2 --json
 ifg compare --mode branches --base release/1 --target release/2 --json
@@ -137,6 +145,7 @@ ifg mcp plan --service SERVICE_ID --mode native --protocol 2025-11-25 --json
 ifg mcp probe --service SERVICE_ID --mode native --protocol 2025-11-25 --approve FINGERPRINT --json
 ifg mcp call echo --service SERVICE_ID --approve FINGERPRINT --args echo-args.json --json
 ifg mcp read task://42 --service SERVICE_ID --approve FINGERPRINT --json
+ifg mcp template-preview 'task://{id}' --args template-args.json --json
 ifg mcp template 'task://{id}' --service SERVICE_ID --approve FINGERPRINT --args template-args.json --assertions assertions.json --json
 ifg mcp prompt task-summary --service SERVICE_ID --approve FINGERPRINT --args prompt-args.json --json
 ifg mcp batch --service SERVICE_ID --approve FINGERPRINT --file sequence.json --json
@@ -185,6 +194,7 @@ Update a record with `--replace --version N` using the current version returned 
 
 ```sh
 ifg wiki preview --lang en --json
+ifg wiki export --lang en --out catalog.json --json
 ifg wiki note-put capability-id --file note.md --json
 ifg wiki build --lang zh-CN --out ./wiki-export --json
 ifg wiki list --json
@@ -197,21 +207,22 @@ ifg data prune --before 2026-01-01 --json
 ifg data prune --before 2026-01-01 --apply --json
 ```
 
-Backups contain SQLite data and manual notes. Restore replaces local records when authorized with `--replace`. Regenerate the Wiki from the restored snapshots. Exported Wiki pages in user selected directories are managed by their manifests. Data pruning defaults to preview.
+`wiki export` returns the same catalog JSON as the desktop download and accepts `--snapshot`. Supply `--out` to write a file and `--replace` to overwrite it. Backups contain SQLite data and manual notes. Restore replaces local records when authorized with `--replace`. Regenerate the Wiki from the restored snapshots. Exported Wiki pages in user selected directories are managed by their manifests. Data pruning defaults to preview.
 
 ## Desktop actions and CLI equivalents
 
-| Desktop operation                                      | CLI entry points                                                                    |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Add, select, locate, hide or delete projects           | `project inspect/add/select/relocate/hide/delete`                                   |
-| Language and update checks                             | `preferences get/set`, `update check`, `update open`                                |
-| Scan progress and task center                          | `scan start`, `task list/show/watch/cancel`                                         |
-| Git branches, graph, selection, and comparison         | `git branches/log/commit/select/browse`, `compare`, `compare file`                  |
-| Catalog, source, and skill details                     | `catalog list/search/show`, `source show`, `skill list/search/show`                 |
-| HTTP requests, assertions, source contracts and export | `api import/draft/preview/send/curl/export`                                         |
-| Isolated MCP discovery and tests                       | `mcp targets/plan/probe/inventory/call/read/template/prompt/batch`                  |
-| Cases, suites and their results                        | `case`, `suite`, `test plan/run`, `run`                                             |
-| Wiki and local data                                    | `wiki preview/build/list/show/open/note-show/note-put`, `data backup/restore/prune` |
-| Developer guide and rules                              | `guide show/cli/validate/serve`, `commands`, `schema`                               |
+| Desktop operation                                      | CLI entry points                                                                                     |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| Add, select, locate, hide or delete projects           | `project inspect/add/select/relocate/hide/delete`                                                    |
+| Language, About and releases                           | `preferences get/set`, `about`, `about --open`, `update check/open`                                  |
+| Scan progress, warnings, errors and task center        | `scan start/list/show/diff`, `task list/show/diagnostics/watch/cancel`                               |
+| Git branches, graph, selection, and comparison         | `git branches/log/commit/select/selection/browse/view/relation`, `compare`, `compare file`           |
+| Catalog, source, and skill details                     | `catalog list/search/show`, `source show`, `skill list/search/show`                                  |
+| HTTP requests, assertions, source contracts and export | `api import/draft/preview/send/curl/export`                                                          |
+| MCP discovery and tests                                | `mcp targets/plan/probe/inventory/call/read/template-preview/template/prompt/batch`                  |
+| Cases, suites and their results                        | `case`, `suite`, `test plan/run`, `run`. Use `case put --file` to save a request and its assertions. |
+| Wiki                                                   | `wiki preview/export/build/list/show/open/note-show/note-put`                                        |
+| Local settings and data                                | `config show/validate/apply`, `profile`, `data backup/restore/prune`                                 |
+| Developer guide and rules                              | `guide show/cli/validate/serve`, `commands`, `schema`                                                |
 
 A terminal graph lists commit lanes and parents. Native folder pickers and save dialogs correspond to explicit paths or `--out`. Text that the desktop can copy is available on stdout or in JSON fields.

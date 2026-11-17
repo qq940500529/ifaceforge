@@ -923,8 +923,10 @@ test('browses and compares selected versions with responsive graph controls', as
     const field = (name: string) => page.getByRole('combobox', { name, exact: true });
     const option = async (name: string, label: RegExp) => {
       const control = field(name);
-      await control.click();
-      await control.fill(label.source.replace(/^\^/, ''));
+      await control.scrollIntoViewIfNeeded();
+      if ((await control.getAttribute('aria-expanded')) !== 'true') await control.press('ArrowDown');
+      await expect(control).toHaveAttribute('aria-expanded', 'true');
+      await control.pressSequentially(label.source.replace(/^\^/, ''));
       const listId = await control.getAttribute('aria-controls');
       const dropdown = page
         .locator('.ant-select-dropdown:visible')

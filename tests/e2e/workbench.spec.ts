@@ -92,8 +92,10 @@ for (const language of ['en', 'zh-CN'] as const) {
         await page.getByRole('button', { name: label('Run', '运行'), exact: true }).click();
         await expect(page.getByText('Sample task', { exact: false }).first()).toBeVisible();
         await page.getByRole('menuitem', { name: 'Wiki', exact: true }).click();
-        await page.getByRole('button', { name: label('Generate Wiki', '生成 Wiki') }).click();
+        const generate = page.getByRole('button', { name: label('Generate Wiki', '生成 Wiki') });
+        await generate.click();
         await expect(page.getByRole('heading', { name: label('IfaceForge Wiki', '接口工坊 Wiki') })).toBeVisible();
+        await expect(generate).not.toHaveClass(/ant-btn-loading/);
         const reader = page.locator('.wiki-detail');
         await reader.getByRole('link', { name: new RegExp('^' + label('Skills', '技能') + ' · \\d+$') }).click();
         await expect(reader.getByRole('heading', { name: label('Skills', '技能'), exact: true })).toBeFocused();

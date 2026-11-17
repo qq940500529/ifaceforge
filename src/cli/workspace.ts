@@ -2,6 +2,8 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AppError, invalid } from '../app/errors.js';
 import { openLocation, version } from '../app/platform.js';
+import { projectInfo } from '../app/about.js';
+import { scanDiagnostics } from '../app/scan-diagnostics.js';
 import type { CommandInput } from '../app/workbench.js';
 import type { Run } from '../app/runs.js';
 import { ensureService, serviceRequest, type ServiceRequest } from '../desktop/service-client.js';
@@ -16,9 +18,10 @@ export type CliInput = CommandInput & {
   force?: boolean;
   stream?: boolean;
   useWorktree?: boolean;
+  severity?: string;
 };
 type Task = ScanTask | VersionTask | Run;
-const releases = 'https://github.com/qq940500529/ifaceforge/releases';
+const releases = projectInfo.repository + '/releases';
 
 export async function workspace<T>(method: ServiceRequest, start = true) {
   let result = await serviceRequest<T>(method);
@@ -169,6 +172,17 @@ export async function globalWorkspace(
     };
   }
   if (name === 'task watch') return { data: await watchTask(id(), project, progress) };
+  if (name === 'task diagnostics') {
+    const severity = input.severity ?? 'all';
+    if (!['all', 'info', 'warning', 'error'].includes(severity)) invalid('Unknown diagnostic severity');
+    if (input.format && !['json', 'text'].includes(input.format)) invalid('Expected json or text format');
+    const task = (await workspace<Task>({ method: 'task show', task: id(), project }))!;
+    if (!('processed' in task) || 'operation' in task) invalid('Expected a scan task identifier');
+    const issues = scanDiagnostics(task).filter(
+      (issue) => severity === 'all' || (issue.severity ?? 'warning') === severity,
+    );
+    return { data: { id: task.id, project: task.project, state: task.state, issues } };
+  }
   if (name === 'task show' || name === 'task cancel')
     return { data: await workspace({ method: name, task: id(), project }) };
   return undefined;
@@ -180,8 +194,12 @@ export async function projectWorkspace(
   input: CliInput,
   environment?: Record<string, string | null>,
 ) {
-  const method = name === 'git select' ? 'git preference' : name === 'scan start' ? 'scan' : name;
-  const needsService = input.async === true || ['scan start', 'git select'].includes(name);
+  const method = ['git select', 'git selection'].includes(name)
+    ? 'git preference'
+    : name === 'scan start'
+      ? 'scan'
+      : name;
+  const needsService = input.async === true || ['scan start', 'git select', 'git selection'].includes(name);
   const payload = { ...input };
   if (payload.file && ['data restore', 'api import'].includes(name) && payload.file !== '-')
     payload.file = resolve(payload.file);

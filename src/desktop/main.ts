@@ -10,10 +10,12 @@ import type { EngineRequest, FileKind, Result } from './protocol.js';
 import type { Locale } from '../app/config.js';
 import { ensureService, serviceRequest } from './service-client.js';
 
+import { projectInfo } from '../app/about.js';
+
 const origin = 'ifaceforge://workbench';
 const page = origin + '/index.html';
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
-const repositoryUrl = 'https://github.com/qq940500529/ifaceforge';
+const repositoryUrl = projectInfo.repository;
 const releaseUrl = repositoryUrl + '/releases';
 const contentPolicy =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";

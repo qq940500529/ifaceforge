@@ -3,6 +3,8 @@ import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { failure, invalid } from '../app/errors.js';
+import { projectInfo } from '../app/about.js';
+import { diagnosticText } from '../app/scan-diagnostics.js';
 import { parseJson, readJson } from '../app/files.js';
 import { Projects } from '../storage/projects.js';
 import { locateProject } from '../app/project.js';
@@ -17,6 +19,8 @@ import { textGraph } from '../app/git-graph.js';
 import type { gitLog } from '../app/git-history.js';
 import type { VersionReport } from '../app/version-compare.js';
 import { referencedEnvironment } from '../protocols/variables.js';
+import { resourceTemplate } from '../protocols/mcp-template.js';
+import type { Diagnostic } from '../scanner/model.js';
 import { catalog } from '../app/catalog.js';
 import { mapping } from '../scanner/openapi.js';
 import { globalWorkspace, projectWorkspace, type CliInput } from './workspace.js';
@@ -27,6 +31,10 @@ function envelope(command: string, data: unknown, error: unknown = null) {
 }
 
 function presentation(name: string, input: CliInput, data: unknown) {
+  if (name === 'task diagnostics' && input.format === 'text') {
+    const { issues } = data as { issues: Diagnostic[] };
+    return { data, text: issues.length ? issues.map(diagnosticText).join('\n\n') + '\n' : '' };
+  }
   if (name === 'git log' && input.format) {
     if (input.format !== 'graph' && input.format !== 'json') invalid('Expected graph or json format');
     const history = data as Awaited<ReturnType<typeof gitLog>>;
@@ -86,6 +94,18 @@ async function main() {
   let workbench: Workbench | undefined;
   const output = (data: unknown) =>
     process.stdout.write(JSON.stringify(json ? envelope(name, data) : data, null, json ? 0 : 2) + '\n');
+  const present = (input: CliInput, data: unknown) => {
+    const result = presentation(name, input, data);
+    if (input.out && ['compare', 'compare file', 'wiki show', 'wiki export', 'task diagnostics'].includes(name)) {
+      const path = resolve(input.out);
+      writeFileSync(path, result.text ?? JSON.stringify(result.data, null, 2) + '\n', {
+        flag: input.replace ? 'w' : 'wx',
+        mode: 0o600,
+      });
+      output({ out: path, format: input.format ?? (name === 'wiki show' ? 'markdown' : 'json') });
+    } else if (!json && result.text !== undefined) process.stdout.write(result.text);
+    else output(result.data);
+  };
   const interrupt = () => {
     void workbench?.executor.close();
   };
@@ -171,6 +191,11 @@ async function main() {
       output(commandReference());
       return;
     }
+    if (name === 'about') {
+      if (input.open) openLocation(projectInfo.repository);
+      output({ ...projectInfo, version });
+      return;
+    }
     if (name === 'guide cli') {
       if (json) output({ markdown: cliGuide(), commands: commandReference() });
       else process.stdout.write(cliGuide());
@@ -206,6 +231,22 @@ async function main() {
     if (typeof input.args === 'string') {
       input.args = input.args.trimStart().startsWith('{') ? parseJson(input.args) : readJson(input.args);
     }
+    if (name === 'mcp template-preview') {
+      const args = input.args === undefined ? {} : input.args;
+      if (!args || typeof args !== 'object' || Array.isArray(args)) invalid('Expected a JSON argument object');
+      const uriTemplate = String(input.id);
+      try {
+        const template = resourceTemplate(uriTemplate);
+        output({
+          uriTemplate,
+          variables: template.variables,
+          uri: template.expand(args as Record<string, unknown>),
+        });
+      } catch (error) {
+        invalid(error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
     if (typeof input.assertions === 'string') input.assertions = readJson(input.assertions);
     registry = new Projects();
     const cliInput = input as CliInput;
@@ -239,7 +280,7 @@ async function main() {
         const task = global.data as { state?: string; status?: string; exitCode?: number };
         process.exitCode = task.exitCode ?? (task.state === 'cancelled' ? 4 : task.state === 'failed' ? 3 : 0);
       }
-      if (!cliInput.stream) output(global.data);
+      if (!cliInput.stream) present(cliInput, global.data);
       return;
     }
     if (name === 'project list') {
@@ -313,18 +354,7 @@ async function main() {
         output(data);
         process.stderr.write(error.message + '\n');
       }
-    } else {
-      const result = presentation(name, cliInput, data);
-      if (cliInput.out && ['compare', 'compare file', 'wiki show'].includes(name)) {
-        const path = resolve(cliInput.out);
-        writeFileSync(path, result.text ?? JSON.stringify(result.data, null, 2) + '\n', {
-          flag: cliInput.replace ? 'w' : 'wx',
-          mode: 0o600,
-        });
-        output({ out: path, format: cliInput.format ?? (name === 'wiki show' ? 'markdown' : 'json') });
-      } else if (!json && result.text !== undefined) process.stdout.write(result.text);
-      else output(result.data);
-    }
+    } else present(cliInput, data);
   } catch (error) {
     const err = failure(error);
     process.exitCode = err.exitCode;

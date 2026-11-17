@@ -36,6 +36,11 @@ export const guideRules = {
     category: 'specification',
     fix: 'Declare a valid name matching the directory and a description in SKILL.md.',
   },
+  SKILL_REFERENCE_MISSING: {
+    severity: 'warning',
+    category: 'specification',
+    fix: 'Restore the referenced file or update the relative link in SKILL.md.',
+  },
   UNRESOLVED_REF: {
     severity: 'error',
     category: 'specification',

@@ -448,6 +448,8 @@ export class Workbench {
         return executor.cancel(id());
       case 'wiki preview':
         return previewWiki(project, repository, wiki());
+      case 'wiki export':
+        return previewWiki(project, repository, { ...wiki(), out: undefined }).catalog;
       case 'wiki build':
         return buildWiki(project, repository, wiki());
       case 'wiki list':

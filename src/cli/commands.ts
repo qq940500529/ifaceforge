@@ -38,6 +38,7 @@ function records(type: 'case' | 'suite') {
 }
 
 export const commands: Usage[] = [
+  command('about', '', ['open']),
   command('project list'),
   command('project add', '<directory>', ['exact'], true, 'id'),
   command('project inspect', '<directory>', [], false, 'id'),
@@ -53,6 +54,13 @@ export const commands: Usage[] = [
   command('service stop', '', ['force'], true),
   command('task list', '', ['all']),
   command('task show', '<task-id>', [], false, 'id'),
+  command(
+    'task diagnostics',
+    '<scan-task-id> --severity warning',
+    ['severity', 'format', 'out', 'replace'],
+    false,
+    'id',
+  ),
   command('task watch', '<task-id>', ['stream'], false, 'id'),
   command('task cancel', '<task-id>', [], true, 'id'),
   command('status'),
@@ -71,6 +79,7 @@ export const commands: Usage[] = [
   command('git browse', '--ref main', ['ref', 'full', 'async'], true),
   command('git view'),
   command('git select', '--base main --target HEAD --mode commits', ['base', 'target', 'mode', 'ancestor'], true),
+  command('git selection'),
   command('git relation', '--base main --target HEAD', ['base', 'target']),
   command('compare', '--base main --target HEAD', [
     'base',
@@ -142,6 +151,7 @@ export const commands: Usage[] = [
     true,
     'id',
   ),
+  command('mcp template-preview', 'task://{id} --args args.json', ['args'], false, 'id'),
   command(
     'mcp prompt',
     'task --profile sample-stdio --args args.json',
@@ -167,6 +177,7 @@ export const commands: Usage[] = [
   command('run cancel', '<run-id>', [], true, 'id'),
   command('run export', '<run-id>', [], false, 'id'),
   command('wiki preview', '--lang en', wiki),
+  command('wiki export', '--out catalog.json', [...wiki, 'replace']),
   command('wiki build', '--lang zh-CN', wiki, true),
   command('wiki list', '', list),
   command('wiki show', '<export-id>', ['page', 'out', 'replace'], false, 'id'),
@@ -196,13 +207,14 @@ export const booleanOptions = new Set([
   'all',
   'stream',
   'force',
+  'open',
 ]);
 export const globalOptions = ['project', 'json', 'help'];
 export const commandNames = new Set([
   ...commands
     .filter(
       (item) =>
-        !/^(?:project |preferences |update |task |service |scan start$|git select$|commands$|schema$|guide (?:serve|cli)$)/.test(
+        !/^(?:about$|project |preferences |update |task |service |scan start$|git select(?:ion)?$|mcp template-preview$|commands$|schema$|guide (?:serve|cli)$)/.test(
           item.name,
         ),
     )

@@ -42,8 +42,14 @@ export function parseSkill(
   }
   const body = match ? text.slice(match[0].length) : text;
   const references = new Map<string, { path: string; status: string }>();
-  const markdown = body.replace(/^[ \t]*(\x60\x60\x60|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, '');
+  const markdown = body.replace(/^[ \t]*(\x60\x60\x60|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*\r?$/gm, (fence) =>
+    fence.replace(/[^\r\n]/g, ' '),
+  );
+  let line = 1 + (match?.[0].match(/\n/g)?.length ?? 0);
+  let offset = 0;
   for (const link of markdown.matchAll(/\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/g)) {
+    line += markdown.slice(offset, link.index).match(/\n/g)?.length ?? 0;
+    offset = link.index;
     const href = link[1] ?? link[2];
     if (href.startsWith('#')) continue;
     if (/^(?:[a-z][\w+.-]*:|\/\/)/i.test(href)) {
@@ -64,6 +70,16 @@ export function parseSkill(
       const available = historical
         ? historical.has(pathToReference)
         : existsSync(projectFile(root, pathToReference, false));
+      if (!available && !references.has(href)) {
+        diagnostics.push({
+          path,
+          line,
+          severity: 'warning',
+          code: 'SKILL_REFERENCE_MISSING',
+          message: 'Skill reference does not exist in this revision',
+          details: { target: pathToReference },
+        });
+      }
       references.set(href, { path: pathToReference, status: available ? 'available' : 'missing' });
     } catch {
       references.set(href, { path: pathToReference, status: 'outside' });
