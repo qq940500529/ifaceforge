@@ -18,10 +18,8 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;
 using System.ComponentModel;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
 
 public static class IfgJob {
     [StructLayout(LayoutKind.Sequential)]
@@ -43,6 +41,19 @@ public static class IfgJob {
         public Io Io;
         public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
     }
+    [StructLayout(LayoutKind.Sequential)]
+    struct StartupInfo {
+        public int Size;
+        public IntPtr Reserved, Desktop, Title;
+        public uint X, Y, XSize, YSize, XChars, YChars, Fill, Flags;
+        public ushort Show, ReservedSize;
+        public IntPtr ReservedData, Input, Output, Error;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct ProcessInfo {
+        public IntPtr Process, Thread;
+        public uint ProcessId, ThreadId;
+    }
     [DllImport("kernel32.dll", SetLastError=true)]
     static extern IntPtr CreateJobObject(IntPtr attributes, string name);
     [DllImport("kernel32.dll", SetLastError=true)]
@@ -51,6 +62,18 @@ public static class IfgJob {
     static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll", SetLastError=true)]
     static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern IntPtr GetStdHandle(int stream);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes,
+        IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment,
+        string directory, ref StartupInfo startup, out ProcessInfo child);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
 
     public static void Contain() {
         IntPtr job = CreateJobObject(IntPtr.Zero, null);
@@ -77,47 +100,34 @@ public static class IfgJob {
         return result.Append('\\', 2 * slashes).Append('"').ToString();
     }
 
-    static Thread Pipe(Stream input, Stream output, Action onClose) {
-        // All three standard streams may use synchronous Windows handles.
-        var thread = new Thread(() => {
-            try {
-                byte[] buffer = new byte[4096];
-                int length;
-                while ((length = input.Read(buffer, 0, buffer.Length)) != 0) {
-                    output.Write(buffer, 0, length);
-                    output.Flush();
-                }
-            } catch (IOException) {
-                // A pipe can close while its peer is exiting.
-            } catch (ObjectDisposedException) {
-            } finally {
-                if (onClose != null) onClose();
-            }
-        });
-        thread.IsBackground = true;
-        thread.Start();
-        return thread;
+    static IntPtr InheritStream(int stream) {
+        IntPtr handle = GetStdHandle(stream);
+        if (!SetHandleInformation(handle, 1, 1)) throw new Win32Exception();
+        return handle;
     }
 
     public static int Run(string command, string[] args, string directory) {
-        var start = new ProcessStartInfo(command, String.Join(" ", Array.ConvertAll(args, Quote)));
-        start.WorkingDirectory = directory;
-        start.UseShellExecute = false;
-        start.CreateNoWindow = true;
-        start.RedirectStandardInput = start.RedirectStandardOutput = start.RedirectStandardError = true;
-        using (var child = Process.Start(start)) {
-            var stdout = Pipe(child.StandardOutput.BaseStream, Console.OpenStandardOutput(), null);
-            var stderr = Pipe(child.StandardError.BaseStream, Console.OpenStandardError(), null);
-            Pipe(Console.OpenStandardInput(), child.StandardInput.BaseStream, () => {
-                try {
-                    child.StandardInput.Close();
-                    if (!child.WaitForExit(400)) Environment.Exit(0);
-                } catch (InvalidOperationException) {}
-            });
-            child.WaitForExit();
-            stdout.Join(250);
-            stderr.Join(250);
-            return child.ExitCode;
+        // Hand the existing pipes to the child without buffering inside the supervisor.
+        var startup = new StartupInfo {
+            Size = Marshal.SizeOf(typeof(StartupInfo)),
+            Flags = 0x100, // STARTF_USESTDHANDLES
+            Input = InheritStream(-10),
+            Output = InheritStream(-11),
+            Error = InheritStream(-12)
+        };
+        var commandLine = new StringBuilder(Quote(command) + " " + String.Join(" ", Array.ConvertAll(args, Quote)));
+        ProcessInfo child;
+        const uint noWindow = 0x08000000;
+        if (!CreateProcess(command, commandLine, IntPtr.Zero, IntPtr.Zero, true, noWindow,
+            IntPtr.Zero, directory, ref startup, out child)) throw new Win32Exception();
+        CloseHandle(child.Thread);
+        try {
+            uint exitCode;
+            if (WaitForSingleObject(child.Process, 0xffffffff) != 0 || !GetExitCodeProcess(child.Process, out exitCode))
+                throw new Win32Exception();
+            return unchecked((int)exitCode);
+        } finally {
+            CloseHandle(child.Process);
         }
     }
 }
