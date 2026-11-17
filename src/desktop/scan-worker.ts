@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { failure } from '../app/errors.js';
 import { activeSnapshot, diffScans, scanProject, trackedFiles, type ScanOptions } from '../app/catalog.js';
+import type { Diagnostic } from '../scanner/model.js';
 import { gitAsync, type ProjectPaths } from '../app/project.js';
 import { effectiveConfig } from '../app/config.js';
 import { AppError } from '../app/errors.js';
@@ -17,6 +18,7 @@ const gitAbort = new AbortController();
 const cancel = () => gitAbort.abort();
 parentPort?.on('message', cancel);
 const cancelled = () => Atomics.load(abort, 0) !== 0;
+const pending: Diagnostic[] = [];
 try {
   const db = openProjectDatabase(project);
   try {
@@ -32,9 +34,10 @@ try {
         throw error;
       },
     );
-    const scan = scanProject(project, repository, {
+    const scan = await scanProject(project, repository, {
       ...input,
-      progress: (progress) => parentPort?.postMessage({ progress }),
+      progress: (progress) => parentPort?.postMessage({ progress, issues: pending.splice(0) }),
+      diagnostic: (issue) => pending.push(issue),
       cancelled,
       includeUntracked,
       scan: scanConfig,
@@ -53,7 +56,7 @@ try {
   const { code, message, details } = failure(
     cancelled() ? new AppError('SCAN_CANCELLED', 'Scan cancelled') : error,
   );
-  parentPort?.postMessage({ error: { code, message, details } });
+  parentPort?.postMessage({ issues: pending, error: { code, message, details } });
 } finally {
   parentPort?.off('message', cancel);
 }

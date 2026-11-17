@@ -5,13 +5,9 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vitest';
 import { address, close, fixture, ifg, repositoryRoot } from '../support/fixture.js';
-// @ts-expect-error The executable JavaScript fixture has no TypeScript declaration.
-import { mcpHttp } from '../../fixtures/express/mcp.mjs';
 
-test('coordinates persistent project tasks, version exports and MCP sessions from separate CLI processes', async () => {
+test('coordinates persistent project tasks and version exports from separate CLI processes', async () => {
   const sample = fixture();
-  const service = mcpHttp();
-  const endpoint = (await address(service)) + '/mcp';
   const run = (...args: string[]) => ifg(sample.root, ...args);
   const git = (...args: string[]) =>
     execFileSync('git', ['-C', sample.root, ...args], { encoding: 'utf8', windowsHide: true }).trim();
@@ -95,21 +91,6 @@ test('coordinates persistent project tasks, version exports and MCP sessions fro
     expect(readFileSync(path, 'utf8')).toContain('read-version');
     expect((await run('compare', '--base', 'baseline', '--target', 'feature', '--out', path)).exit).toBe(3);
 
-    const profile = sample.write('mcp-test-profile.json', {
-      schemaVersion: 1,
-      id: 'demo',
-      name: 'Shared MCP',
-      mcp: { transport: 'streamableHttp', url: endpoint },
-    });
-    expect((await run('profile', 'put', '--file', profile)).exit).toBe(0);
-    const connection = (await run('mcp', 'connect', '--profile', 'demo')).result.data.id;
-    expect((await run('mcp', 'status')).result.data[0]).toMatchObject({ id: connection, profile: 'demo' });
-    const tool = await run('mcp', 'call', 'echo', '--connection', connection, '--args', '{"value":"CLI session"}');
-    expect(tool.exit).toBe(0);
-    expect(JSON.stringify(tool.result.data)).toContain('CLI session');
-    expect((await run('mcp', 'disconnect', connection)).result.data.connected).toBe(false);
-    expect((await run('mcp', 'status')).result.data).toEqual([]);
-
     expect((await run('service', 'stop')).result.data.stopped).toBe(true);
     expect((await run('task', 'show', scan.id)).result.data.state).toBe('complete');
     expect(
@@ -125,7 +106,6 @@ test('coordinates persistent project tasks, version exports and MCP sessions fro
     expect((await run('project', 'delete', project, '--confirm')).result.data.projects).toEqual([]);
     expect(existsSync(join(moved, '.git'))).toBe(true);
   } finally {
-    await close(service);
     sample.destroy();
   }
 }, 90_000);

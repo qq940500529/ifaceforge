@@ -7,7 +7,9 @@ import type { Repository } from '../storage/repository.js';
 import { validate } from '../schemas/index.js';
 import { apiContract, compare, httpChecks, type Assertion, type Check } from './api.js';
 import { prepareHttp, sendHttp, type HttpRequest } from '../protocols/http.js';
-import { McpSession, bindMcpAction, resolveMcpTarget, type Discovery, type McpAction } from '../protocols/mcp.js';
+import { bindMcpAction, resolveMcpTarget, type Discovery, type McpAction } from '../protocols/mcp.js';
+import { openSandbox, type SandboxPlan, type SandboxReport } from '../protocols/mcp-sandbox.js';
+import { openNative, type NativePlan } from '../protocols/mcp-native.js';
 import { Bindings, secretName, type Profile } from '../protocols/variables.js';
 import { mcpId } from '../scanner/model.js';
 import { saveRuntime } from './catalog.js';
@@ -23,7 +25,14 @@ export type Case = {
   extract?: Record<string, string>;
 } & (
   | { kind: 'http'; request: HttpRequest }
-  | { kind: 'mcp'; request: McpAction | { tool: string; arguments: Record<string, unknown> } }
+  | {
+      kind: 'mcp';
+      request: McpAction | { tool: string; arguments: Record<string, unknown> };
+      service?: string;
+      image?: string;
+      mode?: 'isolated' | 'native';
+      protocol?: string;
+    }
 );
 export interface Suite {
   schemaVersion: 1;
@@ -63,9 +72,11 @@ export interface Run {
   finished?: string;
   owner: number;
   phase: 'preparing' | 'sent';
+  mcpStage?: 'preparing' | 'launch' | 'ready' | 'negotiate' | 'list' | 'cleanup';
   cancelRequested?: boolean;
   exitCode?: number;
   steps: RunStep[];
+  sandboxes?: SandboxReport[];
 }
 
 export function putVersioned(
@@ -128,15 +139,26 @@ interface Step {
   assertions?: Assertion[];
   request:
     | { kind: 'http'; template: HttpRequest }
-    | { kind: 'mcp'; action: McpAction; service?: string; connection?: string };
+    | {
+        kind: 'mcp';
+        action: McpAction;
+        service?: string;
+        image?: string;
+        mode?: 'isolated' | 'native';
+        protocol?: string;
+      };
 }
-interface Plan {
+export interface Plan {
   kind: Run['kind'];
   subject: string;
   steps: Step[];
   continueOnFailure?: boolean;
   profile?: string;
 }
+export type McpLaunchPlan = SandboxPlan | NativePlan;
+export type SandboxTarget = { profile: Profile; plan: McpLaunchPlan; service: string; path?: string };
+export type SandboxTargets = Map<Step, SandboxTarget>;
+export const repositoryProfile = (service: string) => 'repo-' + digest(service).slice(0, 20);
 
 export function testPlan(repository: Repository, caseId?: string, suiteId?: string, override?: string): Plan {
   if (Boolean(caseId) === Boolean(suiteId)) invalid('Select a case or suite');
@@ -154,16 +176,25 @@ export function testPlan(repository: Repository, caseId?: string, suiteId?: stri
           invalid('Suite output mapping refers to an undeclared extraction', { id, name });
         extract[alias] = extract[name];
       }
+      const selectedProfile = override ?? item.profile;
+      const service = item.kind === 'mcp' && !selectedProfile ? item.service : undefined;
       const request: Step['request'] =
         item.kind === 'http'
           ? { kind: 'http', template: item.request }
-          : { kind: 'mcp', action: 'type' in item.request ? item.request : { type: 'call', ...item.request } };
+          : {
+              kind: 'mcp',
+              action: 'type' in item.request ? item.request : { type: 'call', ...item.request },
+              service,
+              image: item.image,
+              mode: item.mode,
+              protocol: item.protocol,
+            };
       return {
         id,
         version,
         digest: hash,
         request,
-        profile: override ?? item.profile,
+        profile: selectedProfile ?? (service && repositoryProfile(service)),
         extract,
         assertions: item.assertions,
       };
@@ -172,7 +203,6 @@ export function testPlan(repository: Repository, caseId?: string, suiteId?: stri
 }
 
 export class RunExecutor {
-  private readonly connections = new Map<string, { session: McpSession; bindings: Bindings; profile: string }>();
   private readonly running = new Map<string, { controller: AbortController; finished: Promise<Run> }>();
 
   constructor(
@@ -184,56 +214,10 @@ export class RunExecutor {
     return id ? this.repository.require<Profile>('profiles', id) : undefined;
   }
 
-  async connect(id: string) {
-    const profile = this.profile(id)!;
-    const bindings = new Bindings(profile);
-    try {
-      const session = await McpSession.connect(profile, this.project.root, bindings);
-      const connection = randomUUID();
-      this.connections.set(connection, { session, bindings, profile: id });
-      return bindings.redact({ id: connection, ...session.info() });
-    } catch (error) {
-      const normalized = failure(error);
-      throw new AppError(
-        normalized.code,
-        normalized.message,
-        normalized.exitCode,
-        bindings.redact(normalized.details),
-      );
-    }
-  }
-
-  async disconnect(id: string) {
-    const connection = this.connections.get(id);
-    if (!connection) throw new AppError('NOT_FOUND', 'MCP connection not found');
-    this.connections.delete(id);
-    await connection.session.close();
-    return { id, connected: false };
-  }
-
-  connectionInfo() {
-    return [...this.connections].map(([id, connection]) =>
-      connection.bindings.redact({
-        id,
-        profile: connection.profile,
-        ...connection.session.info(),
-      }),
-    );
-  }
-
-  connectionProfile(id: string) {
-    const connection = this.connections.get(id);
-    if (!connection) throw new AppError('MCP_DISCONNECTED', 'MCP session is no longer available');
-    return connection.profile;
-  }
-
   async close() {
     const running = [...this.running.values()];
     for (const entry of running) entry.controller.abort(new AppError('CANCELED', 'Workbench is shutting down', 4));
-    await Promise.allSettled([
-      ...running.map((entry) => entry.finished),
-      ...[...this.connections.keys()].map((id) => this.disconnect(id)),
-    ]);
+    await Promise.allSettled(running.map((entry) => entry.finished));
   }
 
   http(request: HttpRequest, profile?: string, assertions?: Assertion[]) {
@@ -247,27 +231,30 @@ export class RunExecutor {
 
   mcp(
     steps: (McpAction & { id: string; extract?: Record<string, string>; assertions?: Assertion[] })[],
-    profile: string,
-    service?: string,
-    connection?: string,
+    target: SandboxTarget,
   ) {
     const seen = new Set<string>();
     for (const step of steps) {
       if (seen.has(step.id)) invalid('Duplicate batch step ID', { id: step.id });
       seen.add(step.id);
     }
-    return this.start({
-      kind: 'mcp',
-      subject: steps[0]?.type ?? 'mcp',
+    const profile = target.profile.id;
+    const planned = steps.map(({ id, extract, assertions, ...action }): Step => ({
+      id,
+      extract,
+      assertions,
       profile,
-      steps: steps.map(({ id, extract, assertions, ...action }) => ({
-        id,
-        extract,
-        assertions,
+      request: { kind: 'mcp', action },
+    }));
+    return this.start(
+      {
+        kind: 'mcp',
+        subject: steps[0]?.type ?? 'mcp',
         profile,
-        request: { kind: 'mcp', action, service, connection },
-      })),
-    });
+        steps: planned,
+      },
+      new Map(planned.map((step) => [step, target])),
+    );
   }
 
   cancel(id: string) {
@@ -283,7 +270,7 @@ export class RunExecutor {
     return run;
   }
 
-  start(plan: Plan) {
+  start(plan: Plan, targets: SandboxTargets = new Map()) {
     const run: Run = {
       id: randomUUID(),
       kind: plan.kind,
@@ -298,17 +285,18 @@ export class RunExecutor {
     const controller = new AbortController();
     this.repository.put('runs', run.id, run);
     const finished = Promise.resolve()
-      .then(() => this.execute(run, plan, controller))
+      .then(() => this.execute(run, plan, controller, targets))
       .finally(() => this.running.delete(run.id));
     this.running.set(run.id, { controller, finished });
     return { run, finished };
   }
 
-  private async execute(run: Run, plan: Plan, controller: AbortController) {
-    const sessions = new Map<string, McpSession>();
+  private async execute(run: Run, plan: Plan, controller: AbortController, targets: SandboxTargets) {
+    const sessions = new Map<string, Awaited<ReturnType<typeof openSandbox>> & { plan: McpLaunchPlan }>();
     const outputs: Record<string, unknown> = Object.create(null);
     const secrets = new Set<string>();
     const signal = controller.signal;
+    let unknown = false;
     const checkCancel = () => {
       try {
         if (this.repository.get<Run>('runs', run.id)?.cancelRequested) {
@@ -325,9 +313,19 @@ export class RunExecutor {
         this.repository.put('runs', run.id, run);
       });
     const poll = setInterval(checkCancel, 200);
+    const mcpStage = (stage: NonNullable<Run['mcpStage']>) => {
+      run.mcpStage = stage;
+      save();
+    };
+    const maximum = targets.size
+      ? setTimeout(
+          () => controller.abort(new AppError('MCP_RUN_TIMEOUT', 'The temporary MCP run timed out', 4)),
+          120_000,
+        )
+      : undefined;
     try {
       for (const step of plan.steps) {
-        if (signal.aborted || run.status === 'unknown' || (!plan.continueOnFailure && run.exitCode)) {
+        if (signal.aborted || unknown || (!plan.continueOnFailure && run.exitCode)) {
           run.steps.push({ id: step.id, status: 'skipped' });
           continue;
         }
@@ -350,7 +348,8 @@ export class RunExecutor {
           save();
         };
         try {
-          const profile = this.profile(step.profile);
+          const target = targets.get(step);
+          const profile = target?.profile ?? this.profile(step.profile);
           bindings = new Bindings(
             profile,
             step.request.kind === 'http' ? step.request.template.inputs : {},
@@ -370,17 +369,21 @@ export class RunExecutor {
             observed = response.json;
             checks = httpChecks(step.assertions ?? [], response, contract);
           } else {
-            if (!profile) invalid('An MCP profile is required');
-            const connection = step.request.connection ? this.connections.get(step.request.connection) : undefined;
-            if (step.request.connection && (!connection || connection.profile !== profile.id)) {
-              throw new AppError('MCP_DISCONNECTED', 'MCP session is no longer available');
+            if (!profile || !target) invalid('Approve an MCP launch before running the test');
+            let sandbox = sessions.get(target.plan.fingerprint);
+            if (!sandbox) {
+              const track = (report: SandboxReport) => {
+                (run.sandboxes ??= []).push(report);
+              };
+              mcpStage('preparing');
+              const opened =
+                'mode' in target.plan
+                  ? await openNative(this.project, profile, target.plan, bindings, signal, track, mcpStage)
+                  : await openSandbox(this.project, profile, target.plan, bindings, signal, track, mcpStage);
+              sandbox = { ...opened, plan: target.plan };
+              sessions.set(target.plan.fingerprint, sandbox);
             }
-            let session = connection?.session ?? sessions.get(profile.id);
-            if (!session) {
-              session = await McpSession.connect(profile, this.project.root, bindings, signal);
-              sessions.set(profile.id, session);
-            }
-            for (const value of connection?.bindings.secrets ?? []) bindings.hide(value);
+            const { session } = sandbox;
             const input = bindMcpAction(step.request.action, bindings);
             const action = resolveMcpTarget(input);
             let inventory: Discovery | undefined;
@@ -388,13 +391,12 @@ export class RunExecutor {
               action.type === 'discover' ||
               step.assertions?.some((assertion) => assertion.type === 'toolDiscovered')
             ) {
-              inventory = (await session.execute({ type: 'discover' }, signal)) as Discovery;
-              saveInventory(
-                this.repository,
-                bindings.redact(inventory),
-                profile.id,
-                step.request.service ?? profile.id,
-              );
+              mcpStage('list');
+              inventory = (await session.execute({ type: 'discover' }, signal, undefined, (group) => {
+                record.progress = group;
+                save();
+              })) as Discovery;
+              saveInventory(this.repository, bindings.redact(inventory), target);
             }
             if (action.type === 'discover') result = inventory;
             else {
@@ -423,15 +425,38 @@ export class RunExecutor {
           const err = failure(error);
           record.error = bindings.redact({ code: err.code, message: err.message, details: err.details });
           record.status = err.code === 'MCP_RESULT_UNKNOWN' ? 'unknown' : signal.aborted ? 'canceled' : 'failed';
-          if (record.status === 'unknown') run.status = 'unknown';
+          unknown ||= record.status === 'unknown';
           run.exitCode = Math.max(run.exitCode ?? 0, err.exitCode);
         }
         for (const value of bindings.secrets) secrets.add(value);
         record.durationMs = Math.round(performance.now() - started);
-        run.phase = 'preparing';
+        run.phase = unknown ? 'sent' : 'preparing';
         save();
       }
-      if (run.status !== 'unknown') run.status = signal.aborted ? 'canceled' : run.exitCode ? 'failed' : 'passed';
+      if (sessions.size) {
+        mcpStage('cleanup');
+        const closed = await Promise.all(
+          [...sessions.values()].map(async (sandbox) => {
+            return {
+              commit: sandbox.plan.commit,
+              ...('mode' in sandbox.plan
+                ? { mode: sandbox.plan.mode, codeSource: sandbox.plan.source, sourceHash: sandbox.plan.sourceHash }
+                : {
+                    mode: 'isolated' as const,
+                    backend: 'docker' as const,
+                    imageId: sandbox.plan.imageId,
+                  }),
+              instance: sandbox.instance,
+              cleanup: await sandbox.close(),
+            };
+          }),
+        );
+        (run.sandboxes ??= []).push(...closed);
+        sessions.clear();
+        if (run.sandboxes.some((sandbox) => sandbox.cleanup.state === 'failed'))
+          run.exitCode = Math.max(run.exitCode ?? 0, 3);
+      }
+      run.status = unknown ? 'unknown' : signal.aborted ? 'canceled' : run.exitCode ? 'failed' : 'passed';
       if (signal.aborted) run.exitCode = 4;
       run.exitCode ??= 0;
       run.finished = new Date().toISOString();
@@ -439,7 +464,8 @@ export class RunExecutor {
       return run;
     } finally {
       clearInterval(poll);
-      await Promise.allSettled([...sessions.values()].map((session) => session.close()));
+      clearTimeout(maximum);
+      await Promise.allSettled([...sessions.values()].map((sandbox) => sandbox.close()));
     }
   }
 }
@@ -471,29 +497,67 @@ function mcpCheck(
   );
 }
 
-function saveInventory(repository: Repository, discovery: Discovery, profile: string, service: string) {
+function saveInventory(repository: Repository, discovery: Discovery, target: SandboxTarget) {
+  const {
+    service,
+    path,
+    plan,
+    profile: { id: profile },
+  } = target;
   const complete = discovery.groups.every((group) => ['found', 'empty', 'notPublished'].includes(group.state));
+  const discoveredAt = new Date().toISOString();
+  const mode = 'mode' in plan ? plan.mode : 'isolated';
+  const imageId = 'imageId' in plan ? plan.imageId : undefined;
+  const environment = 'sourceHash' in plan ? plan.sourceHash : imageId;
+  const id =
+    'mcp:' +
+    service +
+    ':' +
+    profile +
+    ':' +
+    plan.commit +
+    ':' +
+    mode +
+    ':' +
+    environment +
+    ':' +
+    discovery.protocolVersion;
   saveRuntime(repository, {
-    id: 'mcp:' + service + ':' + profile,
+    id: complete ? id : id + ':partial',
     profile,
     service,
     kind: 'mcp',
+    commit: plan.commit,
+    sourceKind: 'source' in plan ? plan.source : 'git',
     complete,
     diagnostics: discovery.groups
       .filter((group) => group.error)
       .map((group) => ({ code: group.state, message: group.type })),
     observations: discovery.groups.flatMap((group) =>
       group.items.map((item) => {
-        const name = String(item.uri ?? item.uriTemplate ?? item.name);
+        const reference = String(item.uri ?? item.uriTemplate ?? item.name);
+        const name = typeof item.name === 'string' ? item.name : reference;
         return {
-          id: mcpId(service, group.type, name),
+          id: mcpId(service, group.type, reference),
           kind: 'mcp',
           origin: 'runtime',
           name,
           service,
           profile,
           summary: String(item.description ?? ''),
-          definition: { type: group.type, ...item },
+          definition: {
+            ...item,
+            type: group.type,
+            discovery: {
+              commit: plan.commit,
+              imageId,
+              mode,
+              plan: plan.fingerprint,
+              protocolVersion: discovery.protocolVersion,
+              path,
+              discoveredAt,
+            },
+          },
         };
       }),
     ),

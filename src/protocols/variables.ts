@@ -20,8 +20,16 @@ export interface HttpProfile {
 }
 export type McpProfile = (
   | { transport: 'stdio'; command: string; args?: string[]; cwd?: string; env?: Record<string, EnvRef> }
-  | { transport: 'streamableHttp' | 'sse'; url: string; headers?: Pair[] }
-) & { protocolVersion?: (typeof mcpVersions)[number] };
+  | {
+      transport: 'streamableHttp' | 'sse';
+      url: string;
+      headers?: Pair[];
+      command?: string;
+      args?: string[];
+      cwd?: string;
+      env?: Record<string, EnvRef>;
+    }
+) & { protocolVersion?: (typeof mcpVersions)[number]; image?: string };
 export interface Profile {
   schemaVersion: 1;
   id: string;

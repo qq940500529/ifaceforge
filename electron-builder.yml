@@ -26,9 +26,13 @@ win:
     - target: nsis
       arch: [x64]
 nsis:
+  include: build/windows-installer.nsh
+  installerLanguages: [en_US, zh_CN]
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  createStartMenuShortcut: false
+  createDesktopShortcut: false
   deleteAppDataOnUninstall: false
 mac:
   icon: build/icons/icon.png

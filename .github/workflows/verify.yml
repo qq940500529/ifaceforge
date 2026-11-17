@@ -45,6 +45,11 @@ jobs:
       - run: npm run check
       - run: npm run build
       - run: npm run test:unit
+      - name: Prepare the isolated MCP runtime
+        if: runner.os == 'Linux'
+        run: |
+          docker pull node:26-alpine
+          echo 'IFG_TEST_DOCKER=1' >> "$GITHUB_ENV"
       - run: npm run test:integration
       - if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium
@@ -100,6 +105,12 @@ jobs:
         run: |
           npm run package:cli
           node scripts/check-package.mjs artifacts/desktop/ifaceforge-cli-*.tar.gz
+      - name: Verify Windows installer shortcut options
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath artifacts/desktop -Filter '*.exe' | Select-Object -First 1
+          ./scripts/test-windows-installer.ps1 -Installer $installer.FullName
       - name: Test the installed Windows app
         if: runner.os == 'Windows'
         shell: pwsh
@@ -117,6 +128,8 @@ jobs:
       - name: Test the Linux AppImage
         if: runner.os == 'Linux'
         run: |
+          docker pull node:26-alpine
+          export IFG_TEST_DOCKER=1
           chmod +x artifacts/desktop/*.AppImage
           image=$(realpath artifacts/desktop/*.AppImage)
           mkdir -p "$RUNNER_TEMP/ifaceforge-image"

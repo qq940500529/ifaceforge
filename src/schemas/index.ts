@@ -46,9 +46,19 @@ const scan = {
       {
         id,
         roots: array(text),
-        adapters: array({ enum: ['express', 'fastapi', 'mcp-typescript'] }),
+        adapters: array({ enum: ['express', 'fastapi', 'mcp-typescript', 'mcp-source'] }),
         openapi: array(text),
         mcpConfigs: array(text),
+        mcpRules: array(
+          object(
+            {
+              extension: { type: 'string', pattern: '^[a-z0-9]+$' },
+              method: { type: 'string', pattern: '^[A-Za-z_][A-Za-z_0-9]*$' },
+              capability: { enum: ['tool', 'resource', 'template', 'prompt'] },
+            },
+            ['extension', 'method', 'capability'],
+          ),
+        ),
       },
       ['id'],
     ),
@@ -135,6 +145,7 @@ export const schemas: Record<string, object> = {
               args: array(text),
               cwd: text,
               env: map(env),
+              image: text,
               protocolVersion: { enum: mcpVersions },
             },
             ['transport', 'command'],
@@ -144,6 +155,11 @@ export const schemas: Record<string, object> = {
               transport: { enum: ['streamableHttp', 'sse'] },
               url: text,
               headers,
+              command: text,
+              args: array(text),
+              cwd: text,
+              env: map(env),
+              image: text,
               protocolVersion: { enum: mcpVersions },
             },
             ['transport', 'url'],
@@ -180,6 +196,14 @@ export const schemas: Record<string, object> = {
           name: text,
           kind: { const: kind },
           profile: id,
+          ...(kind === 'mcp'
+            ? {
+                service: text,
+                image: text,
+                mode: { enum: ['isolated', 'native'] },
+                protocol: { enum: ['auto', ...mcpVersions] },
+              }
+            : {}),
           request: kind === 'http' ? request : mcpRequest,
           assertions: array(assertion),
           extract,

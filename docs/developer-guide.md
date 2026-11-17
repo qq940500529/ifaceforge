@@ -11,7 +11,7 @@
 - 让相对 `$ref` 指向同仓库、同提交的文件。维护不同分支时，声明和引用一并提交。对于 Swagger 历史格式，保留原始资源列表和资源声明。
 - 服务提供 OpenAPI 地址时，可在 API 面板直接导入。Express 与 FastAPI 源码识别适合校对路由位置。任意语言都可以通过 OpenAPI 声明提供完整定义。
 - Express 扫描从框架创建的应用、路由器与路由链确认服务端注册。可识别的 `fetch`、Axios 和客户端工厂调用作为调用证据，能匹配接口时附在对应条目的来源里；未匹配的调用可在扫描诊断中查看。
-- 自定义 Python HTTP 分发、动态注册等会在可识别时生成覆盖诊断。`catalog list --kind api --json` 的 `coverage` 写明发现方式和诊断数量，`guide validate --json` 列出具体位置。自定义路由可用 OpenAPI 声明或运行时契约补齐。
+- 自定义 Python HTTP 扫描可读取标准库处理器、固定字符串、仓库内导入的字符串常量及可静态解析的 `re.fullmatch()` 路由。它结合提前返回和字面量分发表确认方法，并与同服务的 OpenAPI 合并。正则来源保留原始表达式，测试目录中的自定义 HTTP 服务跳过源码识别。动态路径会指出具体表达式，缺少契约的已识别路由会指出方法和路径。`catalog list --kind api --json` 的 `coverage` 给出数量及示例。
 
 [HTTP 测试项目](https://github.com/qq940500529/ifaceforge/tree/main/fixtures/express) · [OpenAPI 版本索引](https://spec.openapis.org/oas/)
 
@@ -19,10 +19,10 @@
 
 - 服务应发布稳定的工具名、资源 URI、资源模板和提示词名。填写描述、输入／输出 Schema，标明参数是否必需，给响应提供可测试示例。
 - 离线清单可命名为 `mcp-capabilities.json`，填写 `schemaVersion: 1`、`service`，以及适用的 `protocolVersion`、`serverVersion`。用 `tools`、`resources`、`resourceTemplates` 和 `prompts` 数组发布能力。资源条目提供 `uri`，模板提供 `uriTemplate`。清单适用于所有语言。
-- JavaScript／TypeScript 中可用常量和明确定义的常见 SDK 注册方法，帮助源码扫描定位。运行时决定的值在应用中通过实际连接确认。对同一能力检查离线清单与线上返回是否一致。
-- 项目配置只引用凭据环境变量。为旧服务选择对应协议和传输，执行发现、工具调用、资源读取、模板展开和提示词获取测试。
+- JavaScript／TypeScript 中可用常量和明确定义的常见 SDK 注册方法，帮助源码扫描定位。用隔离发现核对运行时注册的能力与离线清单。
+- 在提交中提供容器内启动命令，必要时指定含依赖的镜像。项目配置只引用凭据环境变量。选择协议版本和传输，测试工具、资源、模板及提示词。
 
-[MCP 测试项目](https://github.com/qq940500529/ifaceforge/tree/main/fixtures/express) · [MCP 规范](https://modelcontextprotocol.io/specification/2026-07-28)
+[MCP 隔离运行指南](mcp.md) · [MCP 规范](https://modelcontextprotocol.io/specification/2026-07-28)
 
 可直接提交以下 `mcp-capabilities.json`，再将能力和参数替换为服务的实际定义。
 

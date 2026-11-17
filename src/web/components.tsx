@@ -1,9 +1,11 @@
 import { Alert, Button, Card, Empty, Input, Select, Skeleton, Space, Tag, Typography } from 'antd';
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Run } from '../app/runs.js';
+import type { SandboxPlan } from '../protocols/mcp-sandbox.js';
 import type { Profile } from '../protocols/variables.js';
-import { type command, download, WebError } from './client.js';
+import { type command, copyText, download, WebError } from './client.js';
 import { type Key, type Language, translator, translatedKey } from './i18n.js';
 
 export interface Project {
@@ -55,22 +57,98 @@ export function useLoad<T>(load: () => Promise<T>, dependencies: readonly unknow
 }
 
 export function ErrorView({ error }: { error: unknown }) {
-  const { t } = useWorkspace();
+  const { t, lang, notify } = useWorkspace();
   if (!error) return null;
   const code = error instanceof WebError ? error.code : 'INVALID_ARGUMENT';
   const message = translatedKey(code) ? t(code) : t('error', { code });
+  const details =
+    error instanceof WebError ? { code, message: error.message, details: error.details } : String(error);
+  const startup =
+    error instanceof WebError && error.details && typeof error.details === 'object'
+      ? (error.details as {
+          exitCode?: number;
+          dockerError?: string;
+          commandError?: string;
+          startupOutput?: string;
+        })
+      : undefined;
+  const reason = startup?.dockerError || startup?.commandError || startup?.startupOutput;
+  const exitLabel =
+    code === 'MCP_NATIVE_FAILED'
+      ? t('processExitCode')
+      : code === 'MCP_SANDBOX_START' || code === 'MCP_SANDBOX_CLEANUP'
+        ? t('containerExitCode')
+        : t('exitCode');
   return (
     <Alert
       type="error"
       showIcon
       title={message}
       description={
-        <details>
-          <summary>{t('details')}</summary>
-          <Code
-            value={error instanceof WebError ? { message: error.message, details: error.details } : String(error)}
-          />
-        </details>
+        <div className="stack">
+          {typeof startup?.exitCode === 'number' && (
+            <Typography.Text strong>
+              {exitLabel} {startup.exitCode}
+            </Typography.Text>
+          )}
+          {typeof reason === 'string' && reason.trim() && <Code value={reason.trim().slice(0, 500)} />}
+          <details>
+            <summary>{t('details')}</summary>
+            <Code value={details} />
+            <Button
+              size="small"
+              onClick={() => {
+                void copyText(typeof details === 'string' ? details : JSON.stringify(details, null, 2)).then(
+                  () => notify(t('copied')),
+                  () => notify(lang === 'zh-CN' ? '复制失败' : 'Could not copy'),
+                );
+              }}
+            >
+              {lang === 'zh-CN' ? '复制错误详情' : 'Copy error details'}
+            </Button>
+          </details>
+        </div>
+      }
+    />
+  );
+}
+
+export function SandboxIssues({
+  issues,
+}: {
+  issues: (SandboxPlan['issues'][number] | { code: 'native-platform'; path: string })[];
+}) {
+  const { lang } = useWorkspace();
+  if (!issues.length) return null;
+  const text =
+    lang === 'zh-CN'
+      ? {
+          'windows-launcher': '此启动器需要 Windows，当前隔离环境使用 Linux',
+          'missing-directory': '所选提交中缺少工作目录',
+          'missing-entry': '所选提交中缺少启动文件',
+          'image-os': '所选镜像需要支持 Linux',
+          'native-platform': '本机缺少兼容的运行方式，请选择适用的可执行文件和脚本解释器',
+        }
+      : {
+          'windows-launcher': 'This launcher requires Windows. The sandbox runs Linux.',
+          'missing-directory': 'The working directory is missing from the selected commit.',
+          'missing-entry': 'The launch file is missing from the selected commit.',
+          'image-os': 'The selected image needs to support Linux.',
+          'native-platform': 'Choose a compatible executable and script interpreter for this host.',
+        };
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      title={lang === 'zh-CN' ? '启动配置与运行环境不兼容' : 'The launch configuration is incompatible'}
+      description={
+        <ul>
+          {issues.map(({ code, path }) => (
+            <li key={code + path}>
+              {text[code]} <code>{path}</code>
+            </li>
+          ))}
+        </ul>
       }
     />
   );
@@ -80,14 +158,78 @@ export function Code({ value }: { value: unknown }) {
   return <pre className="code">{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre>;
 }
 
-export function Markdown({ children }: { children: string }) {
+export function Markdown({
+  children,
+  wikiLink,
+  wikiSections,
+}: {
+  children: string;
+  wikiLink?: (href: string) => (() => void) | undefined;
+  wikiSections?: ReadonlyMap<string, string>;
+}) {
+  const prefix = 'md-' + useId() + '-';
+  const { lang } = useWorkspace();
   return (
     <div className="markdown">
       <ReactMarkdown
         skipHtml
+        remarkPlugins={[remarkGfm]}
+        remarkRehypeOptions={{ clobberPrefix: prefix, footnoteLabel: lang === 'zh-CN' ? '脚注' : 'Footnotes' }}
         components={{
-          a: ({ children, href }) => <span title={href}>{children}</span>,
+          a: ({ children, href, id, ...props }) => {
+            const openPage = href ? wikiLink?.(href) : undefined;
+            const section = href ? wikiSections?.get(href) : undefined;
+            if (openPage) {
+              return (
+                <a
+                  href={href}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    openPage();
+                  }}
+                >
+                  {children}
+                </a>
+              );
+            }
+            const anchor = section ? prefix + section : href?.slice(1);
+            return section || href?.startsWith('#' + prefix) ? (
+              <a
+                href={'#' + anchor}
+                id={id}
+                data-wiki-section={section || undefined}
+                aria-label={props['aria-label']}
+                onClick={(event) => {
+                  event.preventDefault();
+                  const target = anchor ? document.getElementById(anchor) : null;
+                  target?.scrollIntoView({ block: 'nearest' });
+                  target?.focus({ preventScroll: true });
+                }}
+              >
+                {children}
+              </a>
+            ) : (
+              <span title={href}>{children}</span>
+            );
+          },
+          h2: ({ children }) => {
+            const slug = typeof children === 'string' ? children.toLowerCase().replaceAll(' ', '-') : '';
+            const heading = wikiSections?.get('#' + encodeURI(slug));
+            return (
+              <h2 id={heading ? prefix + heading : undefined} tabIndex={heading ? -1 : undefined}>
+                {children}
+              </h2>
+            );
+          },
           img: ({ alt }) => <span>{alt}</span>,
+          table: ({ children }) => (
+            <div className="markdown-table" tabIndex={0}>
+              <table>{children}</table>
+            </div>
+          ),
+          li: ({ node: _node, ...props }) => (
+            <li {...props} tabIndex={props.id?.startsWith(prefix) ? -1 : undefined} />
+          ),
         }}
       >
         {children}
@@ -246,7 +388,8 @@ export function RunView({
   cancel: () => void;
   renderResult?: (result: unknown) => ReactNode;
 }) {
-  const { t } = useWorkspace();
+  const { lang, t } = useWorkspace();
+  const zh = lang === 'zh-CN';
   if (!run) return <EmptyView select />;
   return (
     <div className="stack">
@@ -259,6 +402,23 @@ export function RunView({
           <Button onClick={() => download('run-' + run.id + '.json', run)}>{t('export')}</Button>
         )}
       </Space>
+      {run.sandboxes?.map((sandbox) => (
+        <Alert
+          key={sandbox.instance}
+          type={sandbox.cleanup.state === 'removed' ? 'success' : 'error'}
+          showIcon
+          title={
+            sandbox.cleanup.state === 'removed'
+              ? zh
+                ? '隔离实例已回收'
+                : 'Sandbox removed'
+              : zh
+                ? '隔离实例清理失败'
+                : 'Sandbox cleanup needs attention'
+          }
+          description={sandbox.cleanup.message ?? sandbox.commit.slice(0, 12)}
+        />
+      ))}
       {run.steps.map((step, index) => {
         const response = step.result as
           | {
@@ -344,27 +504,69 @@ export function TextButtonList<T>({
   id,
   selected,
   choose,
+  label,
 }: {
   items: T[];
   name: (item: T) => ReactNode;
   id: (item: T) => string;
   selected?: string;
   choose: (item: T) => void;
+  label?: string;
 }) {
   if (!items.length) return <EmptyView />;
   return (
-    <div>
+    <div
+      className="scroll-list"
+      role={label ? 'region' : undefined}
+      aria-label={label}
+      tabIndex={label ? 0 : undefined}
+    >
       {items.map((item) => (
         <Button
           key={id(item)}
           className="list-button"
           type={selected === id(item) ? 'primary' : 'text'}
+          aria-pressed={selected === id(item)}
           onClick={() => choose(item)}
         >
           {name(item)}
         </Button>
       ))}
     </div>
+  );
+}
+
+export function useSplitView() {
+  const listRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  return {
+    listRef,
+    detailRef,
+    reveal(target?: HTMLElement | null) {
+      const detail = detailRef.current;
+      if (!detail) return;
+      detail.scrollTop = 0;
+      if (getComputedStyle(detail).position !== 'sticky') {
+        (target ?? detail).scrollIntoView({ block: 'start' });
+        detail.focus({ preventScroll: true });
+      }
+    },
+    back() {
+      const list = listRef.current;
+      list?.scrollIntoView({ block: 'start' });
+      (list?.querySelector<HTMLButtonElement>('.list-button[aria-pressed="true"]') ?? list)?.focus({
+        preventScroll: true,
+      });
+    },
+  };
+}
+
+export function BackToList({ onClick }: { onClick: () => void }) {
+  const { lang } = useWorkspace();
+  return (
+    <Button className="back-to-list" onClick={onClick}>
+      ← {lang === 'zh-CN' ? '返回列表' : 'Back to list'}
+    </Button>
   );
 }
 

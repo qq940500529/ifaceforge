@@ -11,7 +11,7 @@ Use the programming language of your choice. The scanner reads standard descript
 - Keep relative references within the same repository revision. For early Swagger descriptions, commit both the resource listing and the referenced declarations.
 - Import a running service's OpenAPI document from its HTTP URL. The Express and FastAPI source adapters add route locations. Standard descriptions work across languages.
 - Express discovery follows bindings created by the framework's application and router factories. Recognized `fetch`, Axios and client factory calls appear as call evidence. Matching calls attach to the endpoint's sources; unmatched calls appear in diagnostics.
-- Discovery reports coverage gaps for recognizable custom Python HTTP dispatch and dynamic registration. `catalog list --kind api --json` includes a `coverage` summary, and `guide validate --json` reports locations. Publish or import an OpenAPI definition for those routes.
+- Static Python HTTP scanning recognizes standard-library handlers, literal paths, repository-local string constants and supported `re.fullmatch()` patterns. It uses early returns and literal dispatch tables to identify methods, and matches the resulting routes to OpenAPI by method, path and service. Regex routes retain the original pattern. The scanner skips custom Python servers in test directories. Dynamic paths and missing contracts appear separately in `catalog list --kind api --json`.
 
 [HTTP test project](https://github.com/qq940500529/ifaceforge/tree/main/fixtures/express) · [OpenAPI releases](https://spec.openapis.org/oas/)
 
@@ -19,10 +19,10 @@ Use the programming language of your choice. The scanner reads standard descript
 
 - Use stable names and URIs for tools, resources, templates and prompts. Give parameters clear descriptions and schemas, and include examples that can be executed in a test.
 - Commit a `mcp-capabilities.json` file with `schemaVersion: 1`, `service`, optional `protocolVersion` and `serverVersion`, and arrays named `tools`, `resources`, `resourceTemplates`, and `prompts`. Supply `uri` for resources and `uriTemplate` for templates. Any language can publish this manifest.
-- Constants and common SDK registration methods make JavaScript and TypeScript source easier to inspect. Confirm values determined at runtime by connecting to the server. Compare the offline definitions against what the server actually advertises.
-- Store credentials through environment references. Exercise discovery, tool calls, resource reads, template expansion and prompt retrieval using the protocol revision and transport offered by the service.
+- Constants and common SDK registration methods make JavaScript and TypeScript source easier to inspect. Compare runtime registrations to the offline definitions through isolated discovery.
+- Commit a launch command that runs inside a container and specify an image with the necessary dependencies. Reference credentials by environment variable. Use the service protocol and transport to test tools, resources, templates and prompts.
 
-[MCP test project](https://github.com/qq940500529/ifaceforge/tree/main/fixtures/express) · [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28)
+[Isolated MCP guide](mcp.md) · [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28)
 
 Start with this `mcp-capabilities.json` and describe the capabilities the service actually exposes.
 

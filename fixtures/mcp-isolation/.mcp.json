@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "sample-stdio": { "command": "node", "args": ["server.mjs"], "protocolVersion": "2025-11-25" },
+    "sample-http": {
+      "url": "http://127.0.0.1:9898/mcp",
+      "command": "node",
+      "args": ["server.mjs", "--http"],
+      "protocolVersion": "2025-11-25"
+    },
+    "remote-declaration": { "url": "https://example.test/mcp" }
+  }
+}

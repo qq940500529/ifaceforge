@@ -75,7 +75,8 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
   const scoped = useCallback(
     <T,>(name: string, input: CommandInput = {}) => {
       const historical =
-        historicalSnapshot && /^(?:catalog |skill |api (?:draft|export)$|wiki (?:preview|build)$)/.test(name);
+        historicalSnapshot &&
+        /^(?:catalog |skill |api (?:draft|export)$|mcp |test (?:plan|run)$|wiki (?:preview|build)$)/.test(name);
       return command<T>(
         name,
         historical && !input.snapshot && !input.ref ? { ...input, snapshot: historicalSnapshot } : input,
@@ -289,7 +290,7 @@ export function Application({ desktop }: { desktop?: DesktopContext }) {
                 )}
                 {project.data && mcpVisited && (
                   <div hidden={page !== 'mcp'}>
-                    <McpPage />
+                    <McpPage key={historicalSnapshot} />
                   </div>
                 )}
               </div>

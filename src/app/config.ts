@@ -5,7 +5,7 @@ import { invalid } from './errors.js';
 import type { Repository } from '../storage/repository.js';
 import { validate } from '../schemas/index.js';
 
-export type Adapter = 'express' | 'fastapi' | 'mcp-typescript';
+export type Adapter = 'express' | 'fastapi' | 'mcp-typescript' | 'mcp-source';
 export type Locale = 'en' | 'zh-CN';
 export interface SourceConfig {
   id: string;
@@ -13,6 +13,7 @@ export interface SourceConfig {
   adapters?: Adapter[];
   openapi?: string[];
   mcpConfigs?: string[];
+  mcpRules?: { extension: string; method: string; capability: 'tool' | 'resource' | 'template' | 'prompt' }[];
 }
 export interface ScanConfig {
   sources?: SourceConfig[];
@@ -52,6 +53,6 @@ export function effectiveConfig(project: ProjectPaths, repository: Repository) {
   if (settings.scan !== undefined) return { settings, scan: settings.scan, source: 'local' };
   if (!existsSync(project.config)) return { settings, scan: {} as ScanConfig, source: 'default' };
   const { value } = checkConfig(project, readJson(projectFile(project.root, '.ifaceforge.json')), 'config');
-  const { sources, exclude } = value;
-  return { settings, scan: { sources, exclude }, source: 'project' };
+  const { sources, exclude, includeUntracked } = value;
+  return { settings, scan: { sources, exclude, includeUntracked }, source: 'project' };
 }

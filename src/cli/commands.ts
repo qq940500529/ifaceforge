@@ -9,6 +9,7 @@ type Usage = {
 const list = ['limit', 'offset'];
 const search = ['kind', 'service', 'origin', 'state', ...list];
 const wiki = ['snapshot', 'out', 'lang'];
+const sandbox = ['profile', 'service', 'image', 'ref', 'mode', 'protocol'];
 
 function command(
   name: string,
@@ -111,47 +112,47 @@ export const commands: Usage[] = [
   command('api send', '--file request.json --profile demo', ['file', 'profile', 'assertions', 'async'], true),
   command('api curl', '--file request.json --profile demo', ['file', 'profile']),
   command('api export', '<capability-id>', ['format', 'ref', 'snapshot'], false, 'id'),
-  command('mcp connect', '--profile sample-stdio', ['profile'], true),
-  command('mcp status'),
-  command('mcp disconnect', '<connection-id>', [], true, 'id'),
+  command('mcp targets', '', ['ref', ...list]),
+  command('mcp inventory', '--service <id>', ['profile', 'service', 'ref', 'mode', 'origin', ...list]),
+  command('mcp plan', '--profile sample-stdio', [...sandbox, 'file']),
   command(
-    'mcp discover',
-    '--profile sample-stdio',
-    ['profile', 'connection', 'service', 'assertions', 'async'],
+    'mcp probe',
+    '--profile sample-stdio --approve <fingerprint>',
+    [...sandbox, 'approve', 'assertions', 'async'],
     true,
   ),
   command(
     'mcp call',
     'echo --profile sample-stdio --args args.json',
-    ['profile', 'connection', 'args', 'assertions', 'async'],
+    [...sandbox, 'approve', 'args', 'assertions', 'async'],
     true,
     'id',
   ),
   command(
     'mcp read',
     'task://42 --profile sample-stdio',
-    ['profile', 'connection', 'assertions', 'async'],
+    [...sandbox, 'approve', 'assertions', 'async'],
     true,
     'id',
   ),
   command(
     'mcp template',
     'task://{id} --profile sample-stdio --args args.json',
-    ['profile', 'connection', 'args', 'assertions', 'async'],
+    [...sandbox, 'approve', 'args', 'assertions', 'async'],
     true,
     'id',
   ),
   command(
     'mcp prompt',
     'task --profile sample-stdio --args args.json',
-    ['profile', 'connection', 'args', 'assertions', 'async'],
+    [...sandbox, 'approve', 'args', 'assertions', 'async'],
     true,
     'id',
   ),
   command(
     'mcp batch',
     '--profile sample-stdio --file sequence.json',
-    ['profile', 'file', 'connection', 'service', 'async'],
+    [...sandbox, 'approve', 'file', 'async'],
     true,
   ),
   command('skill list', '', [...list, 'ref', 'snapshot']),
@@ -159,7 +160,8 @@ export const commands: Usage[] = [
   command('skill show', '<capability-id>', ['ref', 'snapshot'], false, 'id'),
   ...records('case'),
   ...records('suite'),
-  command('test run', '--case demo', ['case', 'suite', 'profile', 'async'], true),
+  command('test plan', '--case demo', ['case', 'suite', 'profile', 'ref']),
+  command('test run', '--case demo', ['case', 'suite', 'profile', 'ref', 'approve', 'async'], true),
   command('run list', '', [...list, 'kind', 'state', 'profile']),
   command('run show', '<run-id>', [], false, 'id'),
   command('run cancel', '<run-id>', [], true, 'id'),
@@ -209,8 +211,6 @@ export const commandNames = new Set([
   'git task',
   'git cancel',
   'project',
-  'mcp connect',
-  'mcp disconnect',
   'wiki open',
 ]);
 

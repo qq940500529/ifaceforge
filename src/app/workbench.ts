@@ -3,6 +3,7 @@ import { safeProfile } from './profiles.js';
 import { apiFragment, importApi, requestDraft, type Assertion } from './api.js';
 import {
   activeSnapshot,
+  catalog,
   diffScans,
   getEntity,
   getSnapshot,
@@ -12,14 +13,16 @@ import {
   searchCatalog,
 } from './catalog.js';
 import { checkConfig, effectiveConfig, type Locale } from './config.js';
-import { sourceText, projectFile, protectedSource } from './files.js';
+import { digest, sourceText, projectFile, protectedSource, stableJson } from './files.js';
 import { commitSource, filePatch, gitCommit, gitLog, gitRefs, gitRelation, resolveCommit } from './git-history.js';
 import { browseVersion, compareVersions, type BrowseVersion, type VersionSelection } from './version-compare.js';
 import { guide, guideDiagnostics } from './guides.js';
+import { assertMcpLaunch, mcpTarget, mcpTargets, requireApproval, testTargets } from './mcp-targets.js';
 import { backupData, pruneData, restoreData } from './maintenance.js';
 import { git, type ProjectPaths } from './project.js';
 import {
   recoverRun,
+  repositoryProfile,
   removeCase,
   RunExecutor,
   putVersioned,
@@ -35,6 +38,7 @@ import { validate } from '../schemas/index.js';
 import type { Kind, Snapshot } from '../scanner/model.js';
 import { curl, prepareHttp, type HttpRequest } from '../protocols/http.js';
 import type { McpAction } from '../protocols/mcp.js';
+import { worktreeHash } from '../protocols/mcp-native.js';
 import { Bindings, secretHeader, secretName, type Profile } from '../protocols/variables.js';
 
 export interface CommandInput {
@@ -52,10 +56,13 @@ export interface CommandInput {
   ref?: string;
   refs?: string[];
   mode?: VersionSelection['mode'];
+  mcpMode?: 'native' | 'isolated';
   ancestor?: string;
   previous?: string;
   profile?: string;
-  connection?: string;
+  approve?: string;
+  image?: string;
+  protocol?: string;
   service?: string;
   kind?: Kind;
   origin?: string;
@@ -106,10 +113,19 @@ export class Workbench {
       out: input.out,
       locale: input.lang ?? effectiveConfig(project, repository).settings.locale,
     });
+    const approvedFingerprint = (fingerprint: string, steps?: Parameters<RunExecutor['mcp']>[0]) =>
+      input.mcpMode === 'native' && steps?.some((step) => step.type !== 'discover')
+        ? digest(stableJson({ fingerprint, steps }))
+        : fingerprint;
     const batch = async (actions: Parameters<RunExecutor['mcp']>[0]) => {
-      const selected =
-        input.profile ?? (input.connection ? executor.connectionProfile(input.connection) : undefined);
-      const run = executor.mcp(actions, need(selected, 'profile'), input.service, input.connection);
+      const target = await mcpTarget(project, repository, {
+        ...input,
+        mode: input.mcpMode,
+        snapshot: input.service ? await historical() : input.snapshot,
+      });
+      assertMcpLaunch(target.plan);
+      requireApproval(approvedFingerprint(target.plan.fingerprint, actions), input.approve);
+      const run = executor.mcp(actions, target);
       return wait ? run.finished : run.run;
     };
     switch (command) {
@@ -138,7 +154,9 @@ export class Workbench {
         return guide(input.lang);
       case 'guide validate': {
         const snapshot = await historical();
-        return guideDiagnostics(snapshot ? getSnapshot(repository, snapshot) : scanProject(project, repository));
+        return guideDiagnostics(
+          snapshot ? getSnapshot(repository, snapshot) : await scanProject(project, repository),
+        );
       }
       case 'git log':
         return gitLog(
@@ -220,7 +238,7 @@ export class Workbench {
       case 'profile remove':
         return { removed: repository.remove('profiles', id()) };
       case 'scan': {
-        const scan = scanProject(project, repository, input);
+        const scan = await scanProject(project, repository, input);
         const { entities, ...summary } = scan;
         const data = { ...summary, count: entities.length };
         if (!scan.complete && input.requireComplete)
@@ -292,13 +310,77 @@ export class Workbench {
         return { curl: curl(validate<HttpRequest>('request', input.body), profile()) };
       case 'api export':
         return apiFragment(getEntity(repository, id(), await historical()), input.format);
-      case 'mcp connect':
-        return executor.connect(need(input.profile, 'profile'));
-      case 'mcp status':
-        return executor.connectionInfo();
-      case 'mcp disconnect':
-        return executor.disconnect(id());
-      case 'mcp discover':
+      case 'mcp targets':
+        return pagination(mcpTargets(repository, await historical()));
+      case 'mcp inventory': {
+        if (Boolean(input.service) === Boolean(input.profile))
+          invalid('Select a repository MCP server or an isolated MCP profile');
+        if (input.mcpMode && input.mcpMode !== 'isolated' && input.mcpMode !== 'native')
+          invalid('Unknown MCP launch mode');
+        const snapshotId = await historical();
+        if (input.origin === 'source' || input.origin === 'declaration') {
+          if (!input.service) invalid('Select a scanned service for source inventory');
+          const service = getEntity(repository, input.service, snapshotId).service;
+          const items = catalog(repository, snapshotId).filter(
+            (item) => item.kind === 'mcp' && item.service === service,
+          );
+          return pagination(
+            items.flatMap((item) =>
+              item.observations.filter(
+                (entry) => entry.origin === input.origin && entry.definition.type !== 'server',
+              ),
+            ),
+          );
+        }
+        const snapshot = snapshotId ? getSnapshot(repository, snapshotId) : undefined;
+        const commit = await resolveCommit(project.root, input.ref ?? snapshot?.commit ?? 'HEAD');
+        const nativeSource =
+          input.mcpMode === 'native' ? (input.ref || snapshot?.source === 'git' ? 'git' : 'worktree') : undefined;
+        const nativeHash = nativeSource === 'worktree' ? await worktreeHash(project.root, commit) : commit;
+        const target = input.service ? repositoryProfile(input.service) : input.profile;
+        const runs = repository
+          .list<Run>('runs')
+          .filter(
+            (run) =>
+              run.kind === 'mcp' &&
+              run.subject === 'discover' &&
+              run.profile === target &&
+              run.sandboxes?.[0]?.commit === commit &&
+              (run.sandboxes[0].mode ?? 'isolated') === (input.mcpMode ?? 'isolated') &&
+              (!nativeSource ||
+                (run.sandboxes[0].codeSource === nativeSource && run.sandboxes[0].sourceHash === nativeHash)) &&
+              run.steps[0]?.result,
+          );
+        return (
+          runs.find((run) =>
+            (run.steps[0].result as import('../protocols/mcp.js').Discovery).groups.every((group) =>
+              ['found', 'empty', 'notPublished'].includes(group.state),
+            ),
+          ) ??
+          runs[0] ??
+          null
+        );
+      }
+      case 'mcp plan': {
+        const target = await mcpTarget(project, repository, {
+          ...input,
+          mode: input.mcpMode,
+          snapshot: input.service ? await historical() : input.snapshot,
+        });
+        const steps =
+          input.body === undefined
+            ? undefined
+            : validate<{ steps: Parameters<RunExecutor['mcp']>[0] }>('mcp-batch', input.body).steps;
+        return {
+          ...target.plan,
+          fingerprint: approvedFingerprint(target.plan.fingerprint, steps),
+          operations: steps?.map((step) => ({ id: step.id, type: step.type })),
+          profile: target.profile.id,
+          service: target.service,
+          path: target.path,
+        };
+      }
+      case 'mcp probe':
         return batch([
           {
             id: 'discover',
@@ -334,9 +416,17 @@ export class Workbench {
       }
       case 'mcp batch':
         return batch(validate<{ steps: Parameters<RunExecutor['mcp']>[0] }>('mcp-batch', input.body).steps);
+      case 'test plan':
       case 'test run': {
         const run = repository.transaction(() => testPlan(repository, input.case, input.suite, input.profile));
-        const handle = executor.start(run);
+        const snapshot = run.steps.some((step) => step.request.kind === 'mcp' && step.request.service)
+          ? await historical()
+          : input.snapshot;
+        const target = await testTargets(project, repository, run, input.ref, snapshot);
+        if (command === 'test plan') return { plans: target.plans, fingerprint: target.fingerprint };
+        for (const launch of target.plans) assertMcpLaunch(launch);
+        if (target.fingerprint) requireApproval(target.fingerprint, input.approve);
+        const handle = executor.start(run, target.targets);
         return wait ? handle.finished : handle.run;
       }
       case 'run list':

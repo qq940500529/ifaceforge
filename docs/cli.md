@@ -125,24 +125,26 @@ A request file can be `{"method":"GET","path":"/tasks/42"}`. Use a path and prof
 
 ## MCP
 
-Create a profile with `mcp` set to `{"transport":"stdio","command":"node","args":["fixtures/express/mcp.mjs","stdio"]}` when the current project is the IfaceForge repository. For Streamable HTTP, start `node fixtures/express/mcp.mjs http modern` and use `{"transport":"streamableHttp","url":"http://127.0.0.1:4301/mcp"}`. The optional final argument to the server chooses its listening port. Use `legacy` in place of `modern` to exercise the 2025 protocol.
+Commit the service's launch configuration and scan the repository. Start a local Docker Linux engine and run `docker pull node:26-alpine` to prepare the default image. Use `--image` for a local image with the service's dependencies. Select a scanned target with `--service` or select your reusable launch configuration with `--profile`.
 
 ```sh
-ifg mcp discover --profile sample-stdio --json
-ifg mcp connect --profile sample-stdio --json
-ifg mcp status --json
-ifg mcp discover --connection <connection-id> --json
-ifg mcp disconnect <connection-id> --json
-ifg mcp call echo --profile sample-stdio --args echo-args.json --json
-ifg mcp read task://42 --profile sample-stdio --json
-ifg mcp template 'task://{id}' --profile sample-stdio --args template-args.json --assertions assertions.json --json
-ifg mcp prompt task-summary --profile sample-stdio --args prompt-args.json --json
-ifg mcp batch --profile sample-stdio --file sequence.json --json
+ifg mcp targets --json
+ifg mcp plan --service SERVICE_ID --json
+ifg mcp probe --service SERVICE_ID --approve FINGERPRINT --json
+ifg mcp inventory --service SERVICE_ID --json
+ifg mcp inventory --service SERVICE_ID --origin source --limit 100 --json
+ifg mcp plan --service SERVICE_ID --mode native --protocol 2025-11-25 --json
+ifg mcp probe --service SERVICE_ID --mode native --protocol 2025-11-25 --approve FINGERPRINT --json
+ifg mcp call echo --service SERVICE_ID --approve FINGERPRINT --args echo-args.json --json
+ifg mcp read task://42 --service SERVICE_ID --approve FINGERPRINT --json
+ifg mcp template 'task://{id}' --service SERVICE_ID --approve FINGERPRINT --args template-args.json --assertions assertions.json --json
+ifg mcp prompt task-summary --service SERVICE_ID --approve FINGERPRINT --args prompt-args.json --json
+ifg mcp batch --service SERVICE_ID --approve FINGERPRINT --file sequence.json --json
 ```
 
 Echo parameters are `{"value":"example"}`. Template parameters are `{"id":42}`. Prompt parameters are `{"title":"Sample task"}`. Pass an optional JSON assertion array such as `[{"type":"textContains","pointer":"/contents/0/text","text":"Task"}]` to `--assertions` on any of these four actions. See the [MCP guide](https://qq940500529.github.io/ifaceforge/mcp.html) for test details.
 
-A batch has `schemaVersion: 1` and named steps with type `discover`, `call`, `read`, `template` or `prompt`. Steps accept `assertions`. A step with `"extract":{"text":"/value"}` can supply `{{text}}` to a later step. Use batches or suites to reuse a connection.
+Use the fingerprint from the reviewed plan with the same target, launch environment, protocol and Git ref. Each run reports the commit and cleanup in `data.sandboxes`. For native tests, plan with `mcp plan --mode native --file batch.json` and pass that file to `mcp batch`. To retrieve a saved native result use `mcp inventory --mode native`. A batch has `schemaVersion: 1` and named steps with type `discover`, `call`, `read`, `template` or `prompt`. Steps accept `assertions`. A step with `"extract":{"text":"/value"}` can supply `{{text}}` to a later step. Matching launches share a temporary instance within one batch or suite.
 
 ## Cases and reports
 
@@ -169,6 +171,8 @@ ifg case export get-task
 ifg suite put --file suite.json --json
 ifg test run --case get-task --json
 ifg test run --suite suite-id --profile demo --json
+ifg test plan --case mcp-case --json
+ifg test run --case mcp-case --approve FINGERPRINT --json
 ifg run list --json
 ifg run show run-id --json
 ifg run cancel run-id --json
@@ -205,8 +209,8 @@ Backups contain SQLite data and manual notes. Restore replaces local records whe
 | Git branches, graph, selection, and comparison         | `git branches/log/commit/select/browse`, `compare`, `compare file`                  |
 | Catalog, source, and skill details                     | `catalog list/search/show`, `source show`, `skill list/search/show`                 |
 | HTTP requests, assertions, source contracts and export | `api import/draft/preview/send/curl/export`                                         |
-| MCP sessions, capability types and test actions        | `mcp connect/status/discover/call/read/template/prompt/disconnect/batch`            |
-| Cases, suites and their results                        | `case`, `suite`, `test run`, `run`                                                  |
+| Isolated MCP discovery and tests                       | `mcp targets/plan/probe/inventory/call/read/template/prompt/batch`                  |
+| Cases, suites and their results                        | `case`, `suite`, `test plan/run`, `run`                                             |
 | Wiki and local data                                    | `wiki preview/build/list/show/open/note-show/note-put`, `data backup/restore/prune` |
 | Developer guide and rules                              | `guide show/cli/validate/serve`, `commands`, `schema`                               |
 

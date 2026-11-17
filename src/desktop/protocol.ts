@@ -1,6 +1,6 @@
 import type { CommandInput } from '../app/workbench.js';
 import type { ScanProgress } from '../app/catalog.js';
-import type { Snapshot } from '../scanner/model.js';
+import type { Diagnostic, Snapshot } from '../scanner/model.js';
 import type { RegisteredProject } from '../storage/projects.js';
 import type { Locale } from '../app/config.js';
 import type { BrowseVersion, VersionReport } from '../app/version-compare.js';
@@ -18,6 +18,7 @@ export interface ScanTask extends ScanProgress {
   finished?: number;
   state: 'running' | 'cancelling' | 'complete' | 'cancelled' | 'failed';
   result?: ScanSummary;
+  issues?: Diagnostic[];
   error?: ErrorInfo;
 }
 export interface VersionTask extends Omit<ScanTask, 'result'> {
@@ -62,12 +63,15 @@ export interface DesktopBridge {
   remove(project: string, erase: boolean): Promise<Result<WorkspaceState>>;
   locale(locale: Locale): Promise<Result<WorkspaceState>>;
   tasks(): Promise<Result<TaskList>>;
+  scanDetails(project: string, task: string): Promise<Result<ScanTask>>;
   cancelScan(project: string, task: string): Promise<Result<ScanTask>>;
   command(project: string, name: string, input: CommandInput): Promise<Result<unknown>>;
   chooseFile(project: string, kind: FileKind): Promise<Result<{ path: string; token: string } | null>>;
   download(name: string, text: string): Promise<Result<boolean>>;
   copy(text: string): Promise<Result<boolean>>;
   releases(): Promise<Result<boolean>>;
+  about(): Promise<Result<{ version: string }>>;
+  repository(): Promise<Result<boolean>>;
 }
 
 declare global {

@@ -13,7 +13,8 @@ import { ensureService, serviceRequest } from './service-client.js';
 const origin = 'ifaceforge://workbench';
 const page = origin + '/index.html';
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
-const releaseUrl = 'https://github.com/qq940500529/ifaceforge/releases';
+const repositoryUrl = 'https://github.com/qq940500529/ifaceforge';
+const releaseUrl = repositoryUrl + '/releases';
 const contentPolicy =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 protocol.registerSchemesAsPrivileged([
@@ -61,10 +62,20 @@ function handle<Args extends unknown[]>(method: string, handler: (...args: Args)
 }
 
 function addHandlers() {
+  handle('about', async () => safe({ version: app.getVersion() }));
+  handle('repository', async () => {
+    await shell.openExternal(repositoryUrl);
+    return safe(true);
+  });
   handle('state', () => send({ method: 'state' }));
   handle('select', (project: string) => send({ method: 'select', project }));
   handle('locale', (locale: Locale) => send({ method: 'locale', locale }));
   handle('tasks', () => send({ method: 'tasks' }));
+  handle('scanDetails', (project: string, task: string) => {
+    if (typeof project !== 'string' || !project || typeof task !== 'string' || !task)
+      invalid('Expected project and scan task identifiers');
+    return send({ method: 'task show', project, task });
+  });
   handle('cancelScan', (project: string, task: string) => send({ method: 'scan cancel', project, task }));
   handle('chooseProject', async () => {
     const picked = await dialog.showOpenDialog(window!, { properties: ['openDirectory'] });

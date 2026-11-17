@@ -1,8 +1,8 @@
 <div align="center">
   <img src="build/icons/icon.png" width="76" height="76" alt="IfaceForge">
   <h1>IfaceForge · 接口工坊</h1>
-  <p><strong>本机 Git 项目的接口与测试工作台</strong></p>
-  <p>浏览和比较 Git 版本中的 API、MCP 与 Skills，把接口验证保存为可复跑的用例。</p>
+  <p><strong>面向 AI 应用项目的接口与技能工作台</strong></p>
+  <p>在同一 Git 版本下查看 API、MCP 与 Skills，审查变更，并把接口验证保存为可复跑的用例。</p>
   <p>
     <a href="https://github.com/qq940500529/ifaceforge/releases"><img alt="下载桌面安装包" src="https://img.shields.io/github/v/release/qq940500529/ifaceforge?include_prereleases&amp;label=%E4%B8%8B%E8%BD%BD&amp;color=245fc4"></a>
     <a href="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml"><img alt="三平台验证" src="https://github.com/qq940500529/ifaceforge/actions/workflows/verify.yml/badge.svg"></a>
@@ -11,7 +11,19 @@
   <p><a href="https://qq940500529.github.io/ifaceforge/">文档站</a> · <a href="docs/README.en.md">English</a> · <a href="docs/mcp.md">MCP 指南</a> · <a href="docs/cli.md">CLI</a> · <a href="CHANGELOG.md">更新日志</a></p>
 </div>
 
-<a href="docs/mcp.md"><img src="docs/assets/mcp-workbench.png" alt="IfaceForge MCP 工作台，左侧为服务目录，右侧为参数、断言和测试结果"></a>
+## 适用项目
+
+当一项业务能力既供应用调用，也供 AI Agent 使用，团队往往需要一起维护三类入口。**API** 提供程序调用的接口，**MCP** 让 Agent 发现和调用工具或读取资源，**Skills** 告诉 Agent 何时使用能力、按什么步骤完成任务。接口、工具参数或操作流程变更时，可以在同一 Git 版本下审查这些入口，并复跑接口测试。
+
+| 项目类型                         | 为什么需要管理这些能力                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **AI 应用与 Agent 产品**         | 如企业助手、研发 Copilot、自动化运维助手。产品调用业务 API，Agent 通过 MCP 使用工具，Skills 记录处理流程。发布前需要一起核对接口、工具参数和操作步骤。 |
+| **接入 AI 的业务系统与开放平台** | 如工单、数据或工程软件平台。同一项业务能力可能同时服务现有客户端、第三方应用和多个 Agent，团队需要核对各入口在不同版本中的变化。                       |
+| **Agent 平台与工具生态**         | 如团队共享工具库、插件平台或工作流平台。多个团队维护服务及技能，平台需要按 Git 版本盘点可用能力、验证工具调用并整理交接文档。                          |
+
+支持本机 Git 工作树。远程仓库先克隆到本机，单服务和多服务仓库都可添加，也可按需管理其中一类能力。OpenAPI、Swagger、MCP 能力清单和 `SKILL.md` 可跨语言扫描，源码识别随框架和注册方式而异。[开发指南与兼容范围](docs/developer-guide.md)
+
+<a href="docs/mcp.md"><img src="docs/assets/mcp-workbench.png" alt="IfaceForge 隔离发现结果、能力目录与工具测试表单"></a>
 
 ## 开始使用
 
@@ -21,7 +33,11 @@
 
 1. 从 [GitHub Releases](https://github.com/qq940500529/ifaceforge/releases) 下载对应安装包，并确保 Git 可从 `PATH` 找到。
 2. 打开 IfaceForge，点击 **添加项目**，选择本机 Git 工作树或其中的文件夹。
-3. 点击 **扫描项目** 查看目录。进入 **MCP**，选择环境并连接，目录会加载该服务提供的能力。
+3. 点击 **扫描项目** 查看目录。进入 **MCP**，选中仓库服务可发起隔离发现。使用已有能力声明时可直接离线查看。
+
+Windows 安装向导默认创建开始菜单快捷方式，桌面快捷方式可选。自动化可用同一个 EXE 静默安装。[Windows 安装参数](docs/workbench.md#windows-交互与静默安装)
+
+**平台验证范围**。Windows x64 已完成本机验收。macOS ARM64 和 Linux x64 提供构建，本次未做实机验收。欢迎试用并在 [GitHub Issues](https://github.com/qq940500529/ifaceforge/issues/new/choose) 提交系统版本、架构、安装包格式和复现步骤。
 
 > [!TIP]
 > 选中 MCP 条目即可打开测试。在同一处查看定义、填写参数、检查返回内容并保存用例。

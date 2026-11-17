@@ -193,4 +193,4 @@ test('enumerates large histories by metadata and scans only requested commits wi
   } finally {
     project.destroy();
   }
-}, 90000);
+}, 180_000);

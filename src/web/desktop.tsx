@@ -18,6 +18,8 @@ import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNod
 import { scopedCommand, unwrap, type command } from './client.js';
 import { translator, type Language } from './i18n.js';
 import { ErrorView } from './components.js';
+import { ScanDiagnostics } from './scan-diagnostics.js';
+import { About } from './about.js';
 import type { RegisteredProject } from '../storage/projects.js';
 import type { DesktopBridge, Result, ScanTask, TaskList, WorkspaceState } from '../desktop/protocol.js';
 
@@ -34,6 +36,8 @@ export interface DesktopContext {
 }
 const projectName = (root: string) => root.split(/[\\/]/).filter(Boolean).at(-1) ?? root;
 const running = (task?: ScanTask) => task?.state === 'running' || task?.state === 'cancelling';
+const scanErrors = (task: ScanTask) => (task.errors ?? 0) + Number(!!task.error);
+const hasDiagnostics = (task: ScanTask) => task.warnings + scanErrors(task) > 0;
 const browserLocale: Language = navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 
 type Candidate = { token: string; selected: string; root: string; relocate?: string };
@@ -46,6 +50,7 @@ type ProjectProps = {
   setLocale: (locale: Language) => Promise<void>;
   startScan: () => Promise<void>;
   cancel: (task: ScanTask) => Promise<void>;
+  showDiagnostics: (task: ScanTask) => void;
   lang: Language;
   View: ComponentType<{ desktop: DesktopContext }>;
 };
@@ -57,6 +62,7 @@ function ScanProgress({
   cancel,
   close,
   retry,
+  details,
   viewResults,
 }: {
   task: ScanTask;
@@ -65,6 +71,7 @@ function ScanProgress({
   cancel: () => void;
   close: () => void;
   retry: () => void;
+  details: () => void;
   viewResults: () => void;
 }) {
   const zh = lang === 'zh-CN';
@@ -82,12 +89,15 @@ function ScanProgress({
     cancelling: msg('Stopping scan', '正在取消扫描'),
     cancelled: msg('Scan cancelled', '扫描已取消'),
     failed: msg('Scan failed', '扫描失败'),
-    complete: task.result?.complete
-      ? msg('Scan complete', '扫描完成')
-      : msg('Scan completed with warnings', '扫描完成，有警告'),
+    complete: hasDiagnostics(task)
+      ? msg('Scan completed with issues', '扫描完成，有诊断')
+      : msg('Scan complete', '扫描完成'),
   };
   const title = running(task) ? msg('Scanning', '正在扫描') : states[task.state as keyof typeof states];
   const elapsed = Math.max(0, ((task.finished ?? now) - task.started) / 1000);
+  const active = running(task);
+  const complete = !!task.result?.complete;
+  const diagnostics = hasDiagnostics(task);
   return (
     <div className="scan-panel" role="status" data-scan-state={task.state}>
       <div className="scan-panel-title">
@@ -117,9 +127,16 @@ function ScanProgress({
             {task.processed} / {task.total}
           </span>
         )}
-        <span>
-          {task.warnings} {msg('warnings', '条警告')}
-        </span>
+        <Space size={8} wrap>
+          <span>
+            {task.warnings} {msg(task.warnings === 1 ? 'warning' : 'warnings', '条警告')}
+          </span>
+          {!!scanErrors(task) && (
+            <Typography.Text type="danger">
+              {scanErrors(task)} {msg(scanErrors(task) === 1 ? 'error' : 'errors', '条错误')}
+            </Typography.Text>
+          )}
+        </Space>
       </div>
       {task.result && (
         <Typography.Text>
@@ -133,27 +150,35 @@ function ScanProgress({
         </Typography.Text>
       )}
       {task.error && <Typography.Text type="danger">{task.error.message}</Typography.Text>}
-      <Space wrap className="scan-actions">
-        {running(task) ? (
-          <Button size="small" onClick={cancel} disabled={task.state === 'cancelling'}>
+      <div className="scan-actions">
+        {active && (
+          <Button size="small" type="text" danger onClick={cancel} disabled={task.state === 'cancelling'}>
             {msg('Cancel scan', '取消扫描')}
           </Button>
-        ) : (
-          <Button size="small" onClick={retry}>
+        )}
+        {!active && complete && (
+          <Button size="small" type="text" onClick={retry}>
             {msg('Scan again', '重新扫描')}
           </Button>
         )}
-        {task.result?.complete && (
-          <Button size="small" onClick={viewResults}>
-            {msg('View catalog', '查看目录')}
-          </Button>
-        )}
-        {!running(task) && (
-          <Button type="primary" size="small" onClick={close}>
-            {msg('Done', '完成')}
-          </Button>
-        )}
-      </Space>
+        <div className="scan-result-actions">
+          {complete && (
+            <Button size="small" type={diagnostics ? 'default' : 'primary'} onClick={viewResults}>
+              {msg('View catalog', '查看目录')}
+            </Button>
+          )}
+          {diagnostics && (
+            <Button size="small" type={complete ? 'primary' : 'default'} onClick={details}>
+              {msg('View diagnostics', '查看诊断')}
+            </Button>
+          )}
+          {!active && !complete && (
+            <Button size="small" type="primary" onClick={retry}>
+              {msg('Scan again', '重新扫描')}
+            </Button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -167,6 +192,7 @@ function ProjectPane({
   setLocale,
   startScan,
   cancel,
+  showDiagnostics,
   lang,
   View,
 }: ProjectProps) {
@@ -206,6 +232,7 @@ function ProjectPane({
                     cancel={() => void cancel(scan)}
                     close={() => setOpenScan(undefined)}
                     retry={() => void startScan()}
+                    details={() => showDiagnostics(scan)}
                     viewResults={() => {
                       viewResults();
                       setOpenScan(undefined);
@@ -235,8 +262,10 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
   const changing = useRef(false);
   const [management, setManagement] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [about, setAbout] = useState(false);
   const [taskCenter, setTaskCenter] = useState(false);
   const [openScan, setOpenScan] = useState<string>();
+  const [diagnostics, setDiagnostics] = useState<ScanTask>();
   const [candidate, setCandidate] = useState<Candidate>();
   const [visited, setVisited] = useState<string[]>([]);
   const [removal, setRemoval] = useState<{ project: RegisteredProject; erase: boolean }>();
@@ -251,6 +280,13 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
     (tasks.versions ?? []).filter((item) => item.state === 'running' || item.state === 'cancelling').length +
     tasks.runs.length;
   const taskProjectName = (id: string) => projectName(projects.find((item) => item.id === id)?.root ?? id);
+  const diagnosticTask = tasks.scans.find((task) => task.id === diagnostics?.id) ?? diagnostics;
+
+  function showDiagnostics(task: ScanTask) {
+    setOpenScan(undefined);
+    setTaskCenter(false);
+    setDiagnostics(task);
+  }
 
   function accept(data: WorkspaceState) {
     setWorkspace((previous) => (JSON.stringify(previous) === JSON.stringify(data) ? previous : data));
@@ -443,6 +479,7 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
             setLocale={(locale) => update(bridge.locale(locale))}
             startScan={() => startScan(record.id)}
             cancel={cancelScan}
+            showDiagnostics={showDiagnostics}
           />
         ))}
       <Modal
@@ -551,7 +588,27 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
             {msg('Check for updates', '检查更新')}
           </Button>
         </div>
+        <div className="preferences-about">
+          <Button
+            type="link"
+            onClick={() => {
+              setSettings(false);
+              setAbout(true);
+            }}
+          >
+            {msg('About IfaceForge', '关于 IfaceForge')}
+          </Button>
+        </div>
       </Modal>
+      {about && (
+        <About
+          lang={lang}
+          close={() => {
+            setAbout(false);
+            setSettings(true);
+          }}
+        />
+      )}
       <Modal open={taskCenter} title={msg('Tasks', '任务')} footer={null} onCancel={() => setTaskCenter(false)}>
         <div className="project-list">
           {!tasks.scans.length && !tasks.versions?.length && !tasks.runs.length && (
@@ -626,6 +683,11 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
                     {msg('Cancel scan', '取消扫描')}
                   </Button>
                 )}
+                {hasDiagnostics(scan) && (
+                  <Button size="small" onClick={() => showDiagnostics(scan)}>
+                    {msg('View diagnostics', '查看诊断')}
+                  </Button>
+                )}
               </Space>
             </div>
           ))}
@@ -656,6 +718,15 @@ export function DesktopApplication({ WorkspaceView }: { WorkspaceView: ProjectPr
           ))}
         </div>
       </Modal>
+      {diagnosticTask && (
+        <ScanDiagnostics
+          key={diagnosticTask.id}
+          task={diagnosticTask}
+          name={taskProjectName(diagnosticTask.project)}
+          lang={lang}
+          close={() => setDiagnostics(undefined)}
+        />
+      )}
     </ConfigProvider>
   );
 }
