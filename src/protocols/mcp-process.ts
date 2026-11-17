@@ -21,7 +21,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading.Tasks;
+using System.Threading;
 
 public static class IfgJob {
     [StructLayout(LayoutKind.Sequential)]
@@ -77,13 +77,26 @@ public static class IfgJob {
         return result.Append('\\', 2 * slashes).Append('"').ToString();
     }
 
-    static async Task Pump(Stream input, Stream output) {
-        byte[] buffer = new byte[4096];
-        int length;
-        while ((length = await input.ReadAsync(buffer, 0, buffer.Length)) != 0) {
-            await output.WriteAsync(buffer, 0, length);
-            await output.FlushAsync();
-        }
+    static Thread Pipe(Stream input, Stream output, Action onClose) {
+        // All three standard streams may use synchronous Windows handles.
+        var thread = new Thread(() => {
+            try {
+                byte[] buffer = new byte[4096];
+                int length;
+                while ((length = input.Read(buffer, 0, buffer.Length)) != 0) {
+                    output.Write(buffer, 0, length);
+                    output.Flush();
+                }
+            } catch (IOException) {
+                // A pipe can close while its peer is exiting.
+            } catch (ObjectDisposedException) {
+            } finally {
+                if (onClose != null) onClose();
+            }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+        return thread;
     }
 
     public static int Run(string command, string[] args, string directory) {
@@ -93,16 +106,17 @@ public static class IfgJob {
         start.CreateNoWindow = true;
         start.RedirectStandardInput = start.RedirectStandardOutput = start.RedirectStandardError = true;
         using (var child = Process.Start(start)) {
-            var stdout = Pump(child.StandardOutput.BaseStream, Console.OpenStandardOutput());
-            var stderr = Pump(child.StandardError.BaseStream, Console.OpenStandardError());
-            var stdin = Pump(Console.OpenStandardInput(), child.StandardInput.BaseStream).ContinueWith(task => {
+            var stdout = Pipe(child.StandardOutput.BaseStream, Console.OpenStandardOutput(), null);
+            var stderr = Pipe(child.StandardError.BaseStream, Console.OpenStandardError(), null);
+            Pipe(Console.OpenStandardInput(), child.StandardInput.BaseStream, () => {
                 try {
                     child.StandardInput.Close();
                     if (!child.WaitForExit(400)) Environment.Exit(0);
                 } catch (InvalidOperationException) {}
             });
             child.WaitForExit();
-            System.Threading.Tasks.Task.WaitAll(new[] { stdout, stderr }, 250);
+            stdout.Join(250);
+            stderr.Join(250);
             return child.ExitCode;
         }
     }
