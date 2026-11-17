@@ -1,7 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client';
 
@@ -149,17 +151,34 @@ export function startMcpProcess(command: string, args: string[], cwd: string, en
     stdio: 'pipe',
   } as const;
   if (process.platform !== 'win32') return spawn(command, args, options);
-  return spawn(
-    windowsPowerShell(),
-    [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-EncodedCommand',
-      Buffer.from(windowsSupervisor, 'utf16le').toString('base64'),
-    ],
-    { ...options, env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd }) } },
-  );
+  const directory = mkdtempSync(join(tmpdir(), 'ifaceforge-mcp-supervisor-'));
+  const script = join(directory, 'supervisor.ps1');
+  const cleanup = () => {
+    try {
+      unlinkSync(script);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return;
+    }
+    try {
+      rmdirSync(directory);
+    } catch {
+      // The temporary directory may already have been cleaned up.
+    }
+  };
+  try {
+    writeFileSync(script, windowsSupervisor, { flag: 'wx' });
+    // Run a file because command mode can read redirected input as a PowerShell pipeline.
+    const child = spawn(
+      windowsPowerShell(),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+      { ...options, env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd }) } },
+    );
+    child.once('close', cleanup);
+    return child;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }
 
 export async function stopMcpProcess(child: ChildProcessWithoutNullStreams) {
