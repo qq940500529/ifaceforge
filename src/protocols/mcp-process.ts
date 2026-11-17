@@ -1,9 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createServer, type Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client';
 
@@ -69,6 +69,9 @@ public static class IfgJob {
     [DllImport("kernel32.dll", SetLastError=true)]
     static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
     [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    static extern IntPtr CreateFile(string path, uint access, uint share, IntPtr attributes,
+        uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
     static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes,
         IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment,
         string directory, ref StartupInfo startup, out ProcessInfo child);
@@ -108,13 +111,19 @@ public static class IfgJob {
         return handle;
     }
 
-    public static int Run(string command, string[] args, string directory) {
-        // Hand the existing pipes to the child without buffering inside the supervisor.
+    static IntPtr OpenPipe(string path, uint access) {
+        IntPtr handle = CreateFile(path, access, 0, IntPtr.Zero, 3, 0, IntPtr.Zero);
+        if (handle == new IntPtr(-1)) throw new Win32Exception();
+        if (!SetHandleInformation(handle, 1, 1)) throw new Win32Exception();
+        return handle;
+    }
+
+    public static int Run(string command, string[] args, string directory, string input, string output) {
         var startup = new StartupInfo {
             Size = Marshal.SizeOf(typeof(StartupInfo)),
             Flags = 0x100, // STARTF_USESTDHANDLES
-            Input = InheritStream(-10),
-            Output = InheritStream(-11),
+            Input = String.IsNullOrEmpty(input) ? InheritStream(-10) : OpenPipe(input, 0x80000000),
+            Output = String.IsNullOrEmpty(output) ? InheritStream(-11) : OpenPipe(output, 0x40000000),
             Error = InheritStream(-12)
         };
         var commandLine = new StringBuilder(Quote(command) + " " + String.Join(" ", Array.ConvertAll(args, Quote)));
@@ -122,6 +131,8 @@ public static class IfgJob {
         const uint noWindow = 0x08000000;
         if (!CreateProcess(command, commandLine, IntPtr.Zero, IntPtr.Zero, true, noWindow,
             IntPtr.Zero, directory, ref startup, out child)) throw new Win32Exception();
+        if (!String.IsNullOrEmpty(input)) CloseHandle(startup.Input);
+        if (!String.IsNullOrEmpty(output)) CloseHandle(startup.Output);
         CloseHandle(child.Thread);
         try {
             uint exitCode;
@@ -135,14 +146,58 @@ public static class IfgJob {
 }
 '@
 [IfgJob]::Contain()
-exit [IfgJob]::Run($launch.command, [string[]]@($launch.args), $launch.cwd)
+exit [IfgJob]::Run($launch.command, [string[]]@($launch.args), $launch.cwd, $launch.pipes.input, $launch.pipes.output)
 `;
 
 export function windowsPowerShell() {
   return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-export function startMcpProcess(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv) {
+type WindowsPipes = { input: string; output: string };
+
+function launchPipe(path: string, receive: (socket: Socket) => void, onError: (error: Error) => void) {
+  let socket: Socket | undefined;
+  let rejectConnection: (error: Error) => void;
+  const server = createServer((connected) => {
+    if (socket) {
+      connected.destroy();
+      return;
+    }
+    socket = connected;
+    socket.on('error', onError);
+    receive(socket);
+    deliver(socket);
+    server.close();
+  });
+  let deliver: (socket: Socket) => void;
+  const connection = new Promise<Socket>((resolve, reject) => {
+    deliver = resolve;
+    rejectConnection = reject;
+  });
+  void connection.catch(() => undefined);
+  const ready = new Promise<void>((resolve, reject) => {
+    server.on('error', reject);
+    server.listen({ path, readableAll: false, writableAll: false }, resolve);
+  });
+  return {
+    ready,
+    connection,
+    end: () => socket?.end(),
+    close() {
+      rejectConnection(new Error('MCP process connection closed'));
+      server.close();
+      socket?.destroy();
+    },
+  };
+}
+
+export function startMcpProcess(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  pipes?: WindowsPipes,
+) {
   const options = {
     cwd,
     env,
@@ -151,34 +206,17 @@ export function startMcpProcess(command: string, args: string[], cwd: string, en
     stdio: 'pipe',
   } as const;
   if (process.platform !== 'win32') return spawn(command, args, options);
-  const directory = mkdtempSync(join(tmpdir(), 'ifaceforge-mcp-supervisor-'));
-  const script = join(directory, 'supervisor.ps1');
-  const cleanup = () => {
-    try {
-      unlinkSync(script);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return;
-    }
-    try {
-      rmdirSync(directory);
-    } catch {
-      // The temporary directory may already have been cleaned up.
-    }
-  };
-  try {
-    writeFileSync(script, windowsSupervisor, { flag: 'wx' });
-    // Run a file because command mode can read redirected input as a PowerShell pipeline.
-    const child = spawn(
-      windowsPowerShell(),
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
-      { ...options, env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd }) } },
-    );
-    child.once('close', cleanup);
-    return child;
-  } catch (error) {
-    cleanup();
-    throw error;
-  }
+  return spawn(
+    windowsPowerShell(),
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(windowsSupervisor, 'utf16le').toString('base64'),
+    ],
+    { ...options, env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd, pipes }) } },
+  );
 }
 
 export async function stopMcpProcess(child: ChildProcessWithoutNullStreams) {
@@ -220,17 +258,15 @@ export class ManagedMcpStdio implements Transport {
   }
   private pending = '';
   private readonly utf8 = new StringDecoder('utf8');
+  private pipes?: { input: ReturnType<typeof launchPipe>; output: ReturnType<typeof launchPipe> };
 
   constructor(
-    private readonly startProcess: () => ChildProcessWithoutNullStreams,
+    private readonly startProcess: (pipes?: WindowsPipes) => ChildProcessWithoutNullStreams,
     private readonly stderr: (chunk: Buffer) => void,
   ) {}
 
   async start() {
-    const child = this.startProcess();
-    this.child = child;
-    child.stderr.on('data', this.stderr);
-    child.stdout.on('data', (chunk: Buffer) => {
+    const read = (chunk: Buffer) => {
       this.pending += this.utf8.write(chunk);
       if (this.pending.length > 2 * 1024 * 1024) {
         this.onerror?.(Error('MCP stdout message exceeds 2 MiB'));
@@ -249,7 +285,23 @@ export class ManagedMcpStdio implements Transport {
           this.onerror?.(error as Error);
         }
       }
-    });
+    };
+    let paths: WindowsPipes | undefined;
+    if (process.platform === 'win32') {
+      const name = '\\\\.\\pipe\\ifaceforge-mcp-' + randomUUID();
+      paths = { input: name + '-in', output: name + '-out' };
+      const onError = (error: Error) => this.onerror?.(error);
+      this.pipes = {
+        input: launchPipe(paths.input, () => undefined, onError),
+        output: launchPipe(paths.output, (socket) => socket.on('data', read), onError),
+      };
+      await Promise.all([this.pipes.input.ready, this.pipes.output.ready]);
+      if (this.closed) throw new Error('MCP process connection closed');
+    }
+    const child = this.startProcess(paths);
+    this.child = child;
+    child.stderr.on('data', this.stderr);
+    child.stdout.on('data', paths ? () => undefined : read);
     child.stdin.on('error', (error) => this.onerror?.(error));
     child.on('error', (error) => this.onerror?.(error));
     child.once('close', () => this.notifyClose());
@@ -259,12 +311,15 @@ export class ManagedMcpStdio implements Transport {
   private notifyClose() {
     if (this.closed) return;
     this.closed = true;
+    this.pipes?.input.close();
+    this.pipes?.output.close();
     this.onclose?.();
   }
 
   close() {
     return (this.stopped ??= (async () => {
       try {
+        this.pipes?.input.end();
         if (this.child) await stopMcpProcess(this.child);
       } finally {
         this.notifyClose();
@@ -273,7 +328,7 @@ export class ManagedMcpStdio implements Transport {
   }
 
   async send(message: JSONRPCMessage) {
-    const stdin = this.child?.stdin;
+    const stdin = this.pipes ? await this.pipes.input.connection : this.child?.stdin;
     if (!stdin?.writable) throw new Error('MCP process connection closed');
     await new Promise<void>((resolve, reject) =>
       stdin.write(JSON.stringify(message) + '\n', (error) => (error ? reject(error) : resolve())),

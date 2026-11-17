@@ -318,7 +318,8 @@ export async function openNative(
     stage = 'launch';
     progress?.(stage);
     if (config.transport === 'stdio') {
-      const start = () => new ManagedMcpStdio(() => startMcpProcess(command, plan.args, cwd, env), capture);
+      const start = () =>
+        new ManagedMcpStdio((pipes) => startMcpProcess(command, plan.args, cwd, env, pipes), capture);
       // The Windows supervisor initializes containment before forwarding the protocol.
       const connectTimeout = process.platform === 'win32' ? 20_000 : undefined;
       transport = start();
