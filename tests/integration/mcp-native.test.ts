@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
@@ -10,10 +10,15 @@ import type { Run } from '../../src/app/runs.js';
 const server = `
 import { createInterface } from 'node:readline';
 import { spawn } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+const trace = (stage) => appendFileSync(process.argv[2], stage + '\\n');
+trace('started');
 const worker = spawn(process.execPath, ['-e', 'setInterval(()=>{}, 1000)'], {stdio:'ignore', windowsHide:true});
+trace('worker started');
 const wire = createInterface({ input: process.stdin });
 wire.on('line', line => {
   const { method, id, params } = JSON.parse(line);
+  trace(method);
   if (method === 'server/discover') process.exit(0);
   if (id === undefined) return;
   const result = {
@@ -33,7 +38,10 @@ wire.on('close', () => process.exit(0));
 it('reviews native launch, retries a legacy stdio server, verifies cleanup and binds test arguments', async () => {
   const sample = fixture('mcp-isolation');
   try {
-    sample.write('.mcp.json', { mcpServers: { native: { command: process.execPath, args: ['server.mjs'] } } });
+    const trace = join(sample.data, 'stdio-trace');
+    sample.write('.mcp.json', {
+      mcpServers: { native: { command: process.execPath, args: ['server.mjs', trace] } },
+    });
     const entry = join(sample.root, 'server.mjs');
     writeFileSync(entry, server);
     commitFixture(sample.root);
@@ -53,7 +61,10 @@ it('reviews native launch, retries a legacy stdio server, verifies cleanup and b
     expect(rejected.result.error?.code).toBe('MCP_SANDBOX_APPROVAL');
     const ready = await plan();
     const { result } = await ifg<Run>(sample.root, 'mcp', 'probe', ...args, '--approve', ready.fingerprint);
-    expect(result.data).toMatchObject({
+    expect(
+      result.data,
+      existsSync(trace) ? readFileSync(trace, 'utf8') : 'Fixture did not reach its entry point',
+    ).toMatchObject({
       status: 'passed',
       sandboxes: [{ mode: 'native', cleanup: { state: 'removed' } }],
       steps: [

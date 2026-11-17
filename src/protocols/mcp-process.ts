@@ -1,7 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
-import { randomUUID } from 'node:crypto';
-import { createServer, type Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -20,8 +18,10 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 
 public static class IfgJob {
     [StructLayout(LayoutKind.Sequential)]
@@ -43,19 +43,6 @@ public static class IfgJob {
         public Io Io;
         public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
     }
-    [StructLayout(LayoutKind.Sequential)]
-    struct StartupInfo {
-        public int Size;
-        public IntPtr Reserved, Desktop, Title;
-        public uint X, Y, XSize, YSize, XChars, YChars, Fill, Flags;
-        public ushort Show, ReservedSize;
-        public IntPtr ReservedData, Input, Output, Error;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    struct ProcessInfo {
-        public IntPtr Process, Thread;
-        public uint ProcessId, ThreadId;
-    }
     [DllImport("kernel32.dll", SetLastError=true)]
     static extern IntPtr CreateJobObject(IntPtr attributes, string name);
     [DllImport("kernel32.dll", SetLastError=true)]
@@ -64,21 +51,6 @@ public static class IfgJob {
     static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll", SetLastError=true)]
     static extern bool CloseHandle(IntPtr handle);
-    [DllImport("kernel32.dll", SetLastError=true)]
-    static extern IntPtr GetStdHandle(int stream);
-    [DllImport("kernel32.dll", SetLastError=true)]
-    static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
-    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    static extern IntPtr CreateFile(string path, uint access, uint share, IntPtr attributes,
-        uint disposition, uint flags, IntPtr template);
-    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes,
-        IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment,
-        string directory, ref StartupInfo startup, out ProcessInfo child);
-    [DllImport("kernel32.dll", SetLastError=true)]
-    static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
-    [DllImport("kernel32.dll", SetLastError=true)]
-    static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
 
     public static void Contain() {
         IntPtr job = CreateJobObject(IntPtr.Zero, null);
@@ -105,99 +77,46 @@ public static class IfgJob {
         return result.Append('\\', 2 * slashes).Append('"').ToString();
     }
 
-    static IntPtr InheritStream(int stream) {
-        IntPtr handle = GetStdHandle(stream);
-        if (!SetHandleInformation(handle, 1, 1)) throw new Win32Exception();
-        return handle;
+    static async Task Pump(Stream input, Stream output) {
+        byte[] buffer = new byte[4096];
+        int length;
+        while ((length = await input.ReadAsync(buffer, 0, buffer.Length)) != 0) {
+            await output.WriteAsync(buffer, 0, length);
+            await output.FlushAsync();
+        }
     }
 
-    static IntPtr OpenPipe(string path, uint access) {
-        IntPtr handle = CreateFile(path, access, 0, IntPtr.Zero, 3, 0, IntPtr.Zero);
-        if (handle == new IntPtr(-1)) throw new Win32Exception();
-        if (!SetHandleInformation(handle, 1, 1)) throw new Win32Exception();
-        return handle;
-    }
-
-    public static int Run(string command, string[] args, string directory, string input, string output) {
-        var startup = new StartupInfo {
-            Size = Marshal.SizeOf(typeof(StartupInfo)),
-            Flags = 0x100, // STARTF_USESTDHANDLES
-            Input = String.IsNullOrEmpty(input) ? InheritStream(-10) : OpenPipe(input, 0x80000000),
-            Output = String.IsNullOrEmpty(output) ? InheritStream(-11) : OpenPipe(output, 0x40000000),
-            Error = InheritStream(-12)
-        };
-        var commandLine = new StringBuilder(Quote(command) + " " + String.Join(" ", Array.ConvertAll(args, Quote)));
-        ProcessInfo child;
-        const uint noWindow = 0x08000000;
-        if (!CreateProcess(command, commandLine, IntPtr.Zero, IntPtr.Zero, true, noWindow,
-            IntPtr.Zero, directory, ref startup, out child)) throw new Win32Exception();
-        if (!String.IsNullOrEmpty(input)) CloseHandle(startup.Input);
-        if (!String.IsNullOrEmpty(output)) CloseHandle(startup.Output);
-        CloseHandle(child.Thread);
-        try {
-            uint exitCode;
-            if (WaitForSingleObject(child.Process, 0xffffffff) != 0 || !GetExitCodeProcess(child.Process, out exitCode))
-                throw new Win32Exception();
-            return unchecked((int)exitCode);
-        } finally {
-            CloseHandle(child.Process);
+    public static int Run(string command, string[] args, string directory) {
+        var start = new ProcessStartInfo(command, String.Join(" ", Array.ConvertAll(args, Quote)));
+        start.WorkingDirectory = directory;
+        start.UseShellExecute = false;
+        start.CreateNoWindow = true;
+        start.RedirectStandardInput = start.RedirectStandardOutput = start.RedirectStandardError = true;
+        using (var child = Process.Start(start)) {
+            var stdout = Pump(child.StandardOutput.BaseStream, Console.OpenStandardOutput());
+            var stderr = Pump(child.StandardError.BaseStream, Console.OpenStandardError());
+            var stdin = Pump(Console.OpenStandardInput(), child.StandardInput.BaseStream).ContinueWith(task => {
+                try {
+                    child.StandardInput.Close();
+                    if (!child.WaitForExit(400)) Environment.Exit(0);
+                } catch (InvalidOperationException) {}
+            });
+            child.WaitForExit();
+            System.Threading.Tasks.Task.WaitAll(new[] { stdout, stderr }, 250);
+            return child.ExitCode;
         }
     }
 }
 '@
 [IfgJob]::Contain()
-exit [IfgJob]::Run($launch.command, [string[]]@($launch.args), $launch.cwd, $launch.pipes.input, $launch.pipes.output)
+exit [IfgJob]::Run($launch.command, [string[]]@($launch.args), $launch.cwd)
 `;
 
 export function windowsPowerShell() {
   return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-type WindowsPipes = { input: string; output: string };
-
-function launchPipe(path: string, receive: (socket: Socket) => void, onError: (error: Error) => void) {
-  let socket: Socket | undefined;
-  let rejectConnection: (error: Error) => void;
-  const server = createServer((connected) => {
-    if (socket) {
-      connected.destroy();
-      return;
-    }
-    socket = connected;
-    socket.on('error', onError);
-    receive(socket);
-    deliver(socket);
-    server.close();
-  });
-  let deliver: (socket: Socket) => void;
-  const connection = new Promise<Socket>((resolve, reject) => {
-    deliver = resolve;
-    rejectConnection = reject;
-  });
-  void connection.catch(() => undefined);
-  const ready = new Promise<void>((resolve, reject) => {
-    server.on('error', reject);
-    server.listen({ path, readableAll: false, writableAll: false }, resolve);
-  });
-  return {
-    ready,
-    connection,
-    end: () => socket?.end(),
-    close() {
-      rejectConnection(new Error('MCP process connection closed'));
-      server.close();
-      socket?.destroy();
-    },
-  };
-}
-
-export function startMcpProcess(
-  command: string,
-  args: string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-  pipes?: WindowsPipes,
-) {
+export function startMcpProcess(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   const options = {
     cwd,
     env,
@@ -215,7 +134,7 @@ export function startMcpProcess(
       '-EncodedCommand',
       Buffer.from(windowsSupervisor, 'utf16le').toString('base64'),
     ],
-    { ...options, env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd, pipes }) } },
+    { ...options, env: { ...env, IFG_MCP_LAUNCH: JSON.stringify({ command, args, cwd }) } },
   );
 }
 
@@ -258,15 +177,17 @@ export class ManagedMcpStdio implements Transport {
   }
   private pending = '';
   private readonly utf8 = new StringDecoder('utf8');
-  private pipes?: { input: ReturnType<typeof launchPipe>; output: ReturnType<typeof launchPipe> };
 
   constructor(
-    private readonly startProcess: (pipes?: WindowsPipes) => ChildProcessWithoutNullStreams,
+    private readonly startProcess: () => ChildProcessWithoutNullStreams,
     private readonly stderr: (chunk: Buffer) => void,
   ) {}
 
   async start() {
-    const read = (chunk: Buffer) => {
+    const child = this.startProcess();
+    this.child = child;
+    child.stderr.on('data', this.stderr);
+    child.stdout.on('data', (chunk: Buffer) => {
       this.pending += this.utf8.write(chunk);
       if (this.pending.length > 2 * 1024 * 1024) {
         this.onerror?.(Error('MCP stdout message exceeds 2 MiB'));
@@ -285,23 +206,7 @@ export class ManagedMcpStdio implements Transport {
           this.onerror?.(error as Error);
         }
       }
-    };
-    let paths: WindowsPipes | undefined;
-    if (process.platform === 'win32') {
-      const name = '\\\\.\\pipe\\ifaceforge-mcp-' + randomUUID();
-      paths = { input: name + '-in', output: name + '-out' };
-      const onError = (error: Error) => this.onerror?.(error);
-      this.pipes = {
-        input: launchPipe(paths.input, () => undefined, onError),
-        output: launchPipe(paths.output, (socket) => socket.on('data', read), onError),
-      };
-      await Promise.all([this.pipes.input.ready, this.pipes.output.ready]);
-      if (this.closed) throw new Error('MCP process connection closed');
-    }
-    const child = this.startProcess(paths);
-    this.child = child;
-    child.stderr.on('data', this.stderr);
-    child.stdout.on('data', paths ? () => undefined : read);
+    });
     child.stdin.on('error', (error) => this.onerror?.(error));
     child.on('error', (error) => this.onerror?.(error));
     child.once('close', () => this.notifyClose());
@@ -311,15 +216,12 @@ export class ManagedMcpStdio implements Transport {
   private notifyClose() {
     if (this.closed) return;
     this.closed = true;
-    this.pipes?.input.close();
-    this.pipes?.output.close();
     this.onclose?.();
   }
 
   close() {
     return (this.stopped ??= (async () => {
       try {
-        this.pipes?.input.end();
         if (this.child) await stopMcpProcess(this.child);
       } finally {
         this.notifyClose();
@@ -328,7 +230,7 @@ export class ManagedMcpStdio implements Transport {
   }
 
   async send(message: JSONRPCMessage) {
-    const stdin = this.pipes ? await this.pipes.input.connection : this.child?.stdin;
+    const stdin = this.child?.stdin;
     if (!stdin?.writable) throw new Error('MCP process connection closed');
     await new Promise<void>((resolve, reject) =>
       stdin.write(JSON.stringify(message) + '\n', (error) => (error ? reject(error) : resolve())),
