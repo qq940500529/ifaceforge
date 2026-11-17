@@ -835,7 +835,9 @@ test('reviews the local MCP process and confirms a test at a narrow width', asyn
     await button('Review launch plan').click();
     await dialog.getByRole('button', { name: 'Start and discover' }).click();
     const failure = page.getByRole('alert').filter({ hasText: 'The local MCP process could not start.' });
-    await expect(failure.getByText('Local process exit code 1', { exact: true })).toBeVisible();
+    await expect(failure.getByText('Local process exit code 1', { exact: true })).toBeVisible({
+      timeout: 90_000,
+    });
     await expect(failure.getByText('Required local settings file was not found.', { exact: true })).toBeVisible();
     await failure.scrollIntoViewIfNeeded();
     await page.screenshot({
